@@ -110,6 +110,7 @@ export default function Caja() {
           </div>
         </div>
 
+
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="stat-card bg-gradient-to-br from-primary/10 to-primary/5">
