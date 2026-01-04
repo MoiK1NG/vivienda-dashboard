@@ -302,36 +302,107 @@ export default function Caja() {
 
         {/* Table */}
         <div className="stat-card overflow-hidden p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="overflow-x-auto max-w-full">
+            <table className="w-full min-w-[1200px]">
               <thead>
+                {/* Filter Row */}
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="py-2 px-4 min-w-[140px]">
+                    <Input
+                      type="date"
+                      placeholder="Desde..."
+                      value={fechaDesde ? format(fechaDesde, "yyyy-MM-dd") : ""}
+                      onChange={(e) => setFechaDesde(e.target.value ? new Date(e.target.value) : undefined)}
+                      className="h-8 text-xs"
+                    />
+                  </th>
+                  <th className="py-2 px-4 min-w-[180px]">
+                    <Input
+                      placeholder="Concepto..."
+                      value={concepto}
+                      onChange={(e) => setConcepto(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </th>
+                  <th className="py-2 px-4 min-w-[160px]">
+                    <Input
+                      placeholder="Pagado a..."
+                      value={pagadoA}
+                      onChange={(e) => setPagadoA(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </th>
+                  <th className="py-2 px-4 min-w-[160px]">
+                    <Input
+                      placeholder="Tercer destino..."
+                      value={tercerDestino}
+                      onChange={(e) => setTercerDestino(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </th>
+                  <th className="py-2 px-4 min-w-[140px]">
+                    <Input
+                      placeholder="Negocio..."
+                      value={negocio}
+                      onChange={(e) => setNegocio(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </th>
+                  <th className="py-2 px-4 min-w-[180px]">
+                    <Input
+                      placeholder="Observaciones..."
+                      value={observaciones}
+                      onChange={(e) => setObservaciones(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                  </th>
+                  <th className="py-2 px-4 min-w-[120px]">
+                    <div className="flex gap-1">
+                      <Input
+                        type="number"
+                        placeholder="Min"
+                        value={valorMin}
+                        onChange={(e) => setValorMin(e.target.value)}
+                        className="h-8 text-xs w-16"
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Max"
+                        value={valorMax}
+                        onChange={(e) => setValorMax(e.target.value)}
+                        className="h-8 text-xs w-16"
+                      />
+                    </div>
+                  </th>
+                </tr>
+                {/* Header Row */}
                 <tr className="border-b border-border bg-secondary/50">
-                  <th className="text-left py-4 px-6 text-sm font-medium text-muted-foreground">Fecha</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-muted-foreground">Concepto</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-muted-foreground">Pagado A</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-muted-foreground">Tercer Destino</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-muted-foreground">Negocio</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-muted-foreground">Observaciones</th>
-                  <th className="text-right py-4 px-6 text-sm font-medium text-muted-foreground">Valor</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Fecha</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Concepto</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Pagado A</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Tercer Destino</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Negocio</th>
+                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Observaciones</th>
+                  <th className="text-right py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Valor</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredMovs.map((mov) => (
                   <tr key={mov.registro_id} className="border-b border-border hover:bg-secondary/30 transition-colors">
-                    <td className="py-4 px-6">
+                    <td className="py-3 px-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-muted-foreground" />
+                        <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                         <span className="text-sm">
                           {mov.fecha ? new Date(mov.fecha).toLocaleDateString('es-CO') : '-'}
                         </span>
                       </div>
                     </td>
-                    <td className="py-4 px-6 font-medium max-w-xs truncate">{mov.concepto || '-'}</td>
-                    <td className="py-4 px-6 text-sm text-muted-foreground max-w-xs truncate">{mov.pagado_a || '-'}</td>
-                    <td className="py-4 px-6 text-sm text-muted-foreground max-w-xs truncate">{mov.tercer_destino_giro || '-'}</td>
-                    <td className="py-4 px-6 text-sm text-muted-foreground max-w-xs truncate">{mov.negocio || '-'}</td>
-                    <td className="py-4 px-6 text-sm text-muted-foreground max-w-xs truncate">{mov.observaciones || '-'}</td>
-                    <td className="py-4 px-6 text-right">
+                    <td className="py-3 px-4 font-medium max-w-[200px] truncate">{mov.concepto || '-'}</td>
+                    <td className="py-3 px-4 text-sm text-muted-foreground max-w-[180px] truncate">{mov.pagado_a || '-'}</td>
+                    <td className="py-3 px-4 text-sm text-muted-foreground max-w-[180px] truncate">{mov.tercer_destino_giro || '-'}</td>
+                    <td className="py-3 px-4 text-sm text-muted-foreground max-w-[160px] truncate">{mov.negocio || '-'}</td>
+                    <td className="py-3 px-4 text-sm text-muted-foreground max-w-[200px] truncate">{mov.observaciones || '-'}</td>
+                    <td className="py-3 px-4 text-right whitespace-nowrap">
                       <span className="font-semibold text-foreground">
                         {formatCurrency(mov.valor_num || 0)}
                       </span>
