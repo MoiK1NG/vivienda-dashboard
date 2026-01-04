@@ -1,426 +1,542 @@
-import { useState } from "react";
-import { MainLayout } from "@/components/layout/MainLayout";
-import { useCajaConsorcio, getCajaStats } from "@/hooks/useCajaConsorcio";
-import { Search, Download, Calendar, Wallet, Loader2, X, Filter } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import React, { useMemo, useState } from "react";
+import { useCajaConsorcio } from "@/hooks/useCajaConsorcio";
+
+// Si tienes componentes UI (shadcn) en tu repo, úsalos.
+// Si alguno no existe, puedes reemplazar por <div>, <button>, <input> sin problema.
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-export default function Caja() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [fechaDesde, setFechaDesde] = useState<Date | undefined>();
-  const [fechaHasta, setFechaHasta] = useState<Date | undefined>();
-  const [pagadoA, setPagadoA] = useState("");
-  const [tercerDestino, setTercerDestino] = useState("");
-  const [concepto, setConcepto] = useState("");
-  const [valorMin, setValorMin] = useState("");
-  const [valorMax, setValorMax] = useState("");
-  const [negocio, setNegocio] = useState("");
-  const [observaciones, setObservaciones] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
+type CajaRow = {
+  registro_id?: string;
+  fecha?: string; // "YYYY-MM-DD"
+  pagado_a?: string;
+  concepto?: string;
+  valor?: string; // texto (opcional)
+  valor_num?: number | null;
+  negocio?: string;
+  observaciones?: string;
+  updated_at?: string;
+};
 
-  const { data: cajaData, isLoading, error } = useCajaConsorcio();
+function toDateMs(yyyyMmDd?: string): number | null {
+  if (!yyyyMmDd) return null;
+  // Forzamos medianoche UTC para comparación consistente
+  const iso = `${yyyyMmDd}T00:00:00.000Z`;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+}
 
-  const filteredMovs = (cajaData || []).filter(m => {
-    // Búsqueda general
-    const matchesSearch = searchTerm === "" || 
-      (m.concepto?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
-      (m.observaciones?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
-      (m.pagado_a?.toLowerCase() || "").includes(searchTerm.toLowerCase());
+function formatCOP(n: number): string {
+  try {
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: "COP",
+      maximumFractionDigits: 0,
+    }).format(n);
+  } catch {
+    // fallback
+    const sign = n < 0 ? "-" : "";
+    const abs = Math.abs(n);
+    return `${sign}$${abs.toLocaleString("es-CO")}`;
+  }
+}
 
-    // Filtro por fecha
-    const movDate = m.fecha ? new Date(m.fecha) : null;
-    const matchesFechaDesde = !fechaDesde || (movDate && movDate >= fechaDesde);
-    const matchesFechaHasta = !fechaHasta || (movDate && movDate <= fechaHasta);
+function safeLower(v: unknown): string {
+  return (v ?? "").toString().toLowerCase();
+}
 
-    // Filtros de texto
-    const matchesPagadoA = pagadoA === "" || (m.pagado_a?.toLowerCase() || "").includes(pagadoA.toLowerCase());
-    const matchesTercerDestino = tercerDestino === "" || (m.tercer_destino_giro?.toLowerCase() || "").includes(tercerDestino.toLowerCase());
-    const matchesConcepto = concepto === "" || (m.concepto?.toLowerCase() || "").includes(concepto.toLowerCase());
-    const matchesNegocio = negocio === "" || (m.negocio?.toLowerCase() || "").includes(negocio.toLowerCase());
-    const matchesObservaciones = observaciones === "" || (m.observaciones?.toLowerCase() || "").includes(observaciones.toLowerCase());
+function downloadCSV(filename: string, rows: CajaRow[]) {
+  const headers = [
+    "registro_id",
+    "fecha",
+    "pagado_a",
+    "concepto",
+    "negocio",
+    "valor_num",
+    "valor",
+    "observaciones",
+    "updated_at",
+  ];
 
-    // Filtro por valor
-    const valor = m.valor_num || 0;
-    const matchesValorMin = valorMin === "" || valor >= parseFloat(valorMin);
-    const matchesValorMax = valorMax === "" || valor <= parseFloat(valorMax);
-
-    return matchesSearch && matchesFechaDesde && matchesFechaHasta && 
-           matchesPagadoA && matchesTercerDestino && matchesConcepto && 
-           matchesNegocio && matchesObservaciones && matchesValorMin && matchesValorMax;
-  });
-
-  const stats = getCajaStats(filteredMovs);
-  const formatCurrency = (value: number) => `$${value.toLocaleString('es-CO')}`;
-
-  const clearFilters = () => {
-    setSearchTerm("");
-    setFechaDesde(undefined);
-    setFechaHasta(undefined);
-    setPagadoA("");
-    setTercerDestino("");
-    setConcepto("");
-    setValorMin("");
-    setValorMax("");
-    setNegocio("");
-    setObservaciones("");
+  const escape = (value: unknown) => {
+    const s = (value ?? "").toString();
+    // CSV escaping: wrap in quotes if needed, escape internal quotes
+    const needsQuotes = /[",\n]/.test(s);
+    const escaped = s.replace(/"/g, '""');
+    return needsQuotes ? `"${escaped}"` : escaped;
   };
 
-  const hasActiveFilters = searchTerm || fechaDesde || fechaHasta || pagadoA || 
-    tercerDestino || concepto || valorMin || valorMax || negocio || observaciones;
+  const lines = [
+    headers.join(","),
+    ...rows.map((r) =>
+      headers
+        .map((h) => {
+          const val =
+            h === "valor_num"
+              ? (r.valor_num ?? "").toString()
+              : (r as any)[h];
+          return escape(val);
+        })
+        .join(",")
+    ),
+  ];
 
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export default function Caja() {
+  // Ajusta esto si tu hook devuelve otro nombre:
+  // Ej: const { data, isLoading, error } = useCajaConsorcio();
+  const { data, isLoading, error } = useCajaConsorcio() as {
+    data?: CajaRow[];
+    isLoading?: boolean;
+    error?: any;
+  };
+
+  const rows = (data ?? []) as CajaRow[];
+
+  // -------------------------
+  // UI State
+  // -------------------------
+  const [search, setSearch] = useState("");
+  const [negocio, setNegocio] = useState<string>("ALL");
+  const [onlyNegatives, setOnlyNegatives] = useState(false);
+
+  // Rango de fechas (input type="date")
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
+
+  // Orden
+  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+
+  // Paginación
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  // Reset page cuando cambian filtros
+  React.useEffect(() => {
+    setPage(1);
+  }, [search, negocio, onlyNegatives, fromDate, toDate, sortDir, pageSize]);
+
+  // -------------------------
+  // Derived: options
+  // -------------------------
+  const negocios = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      const n = (r.negocio ?? "").trim();
+      if (n) set.add(n);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  // -------------------------
+  // Filtering + sorting
+  // -------------------------
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const fromMs = fromDate ? toDateMs(fromDate) : null;
+    const toMs = toDate ? toDateMs(toDate) : null;
+
+    const out = rows.filter((r) => {
+      // negocio
+      if (negocio !== "ALL" && (r.negocio ?? "") !== negocio) return false;
+
+      // negativos
+      if (onlyNegatives && !((r.valor_num ?? 0) < 0)) return false;
+
+      // rango de fechas
+      if (fromMs !== null || toMs !== null) {
+        const ms = toDateMs(r.fecha);
+        if (ms === null) return false;
+        if (fromMs !== null && ms < fromMs) return false;
+        if (toMs !== null && ms > toMs) return false;
+      }
+
+      // búsqueda libre
+      if (!q) return true;
+      const hay = [
+        r.registro_id,
+        r.fecha,
+        r.pagado_a,
+        r.concepto,
+        r.negocio,
+        r.observaciones,
+        r.valor,
+      ]
+        .map(safeLower)
+        .join(" ");
+      return hay.includes(q);
+    });
+
+    // ordenar por fecha (y fallback por registro_id)
+    out.sort((a, b) => {
+      const am = toDateMs(a.fecha) ?? 0;
+      const bm = toDateMs(b.fecha) ?? 0;
+      const diff = am - bm;
+      if (diff !== 0) return sortDir === "asc" ? diff : -diff;
+      const ar = (a.registro_id ?? "").localeCompare(b.registro_id ?? "");
+      return sortDir === "asc" ? ar : -ar;
+    });
+
+    return out;
+  }, [rows, search, negocio, onlyNegatives, fromDate, toDate, sortDir]);
+
+  // -------------------------
+  // KPIs (sobre filtrado)
+  // -------------------------
+  const stats = useMemo(() => {
+    let ingresos = 0;
+    let egresos = 0;
+    let balance = 0;
+
+    for (const r of filtered) {
+      const v = Number(r.valor_num ?? 0);
+      if (!Number.isFinite(v)) continue;
+      balance += v;
+      if (v >= 0) ingresos += v;
+      else egresos += v; // negativo
+    }
+
+    return {
+      count: filtered.length,
+      ingresos,
+      egresos, // negativo
+      balance,
+    };
+  }, [filtered]);
+
+  // -------------------------
+  // Pagination
+  // -------------------------
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const paged = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, safePage, pageSize]);
+
+  // -------------------------
+  // UI
+  // -------------------------
   if (isLoading) {
     return (
-      <MainLayout>
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      </MainLayout>
+      <div className="p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Caja</CardTitle>
+          </CardHeader>
+          <CardContent>Cargando datos…</CardContent>
+        </Card>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <MainLayout>
-        <div className="stat-card text-center py-12">
-          <p className="text-destructive">Error al cargar los datos: {error.message}</p>
-        </div>
-      </MainLayout>
+      <div className="p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Caja</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="text-red-600">
+              Error cargando la información desde Supabase.
+            </div>
+            <pre className="text-xs whitespace-pre-wrap break-words bg-muted p-3 rounded">
+              {String(error?.message ?? error)}
+            </pre>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   return (
-    <MainLayout>
-      <div className="space-y-6 animate-fade-in">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Caja Consorcio</h1>
-            <p className="text-muted-foreground">Movimientos del consorcio</p>
-          </div>
-          <div className="flex gap-3">
-            <Button variant="secondary" className="flex items-center gap-2">
-              <Download className="w-4 h-4" />
-              Exportar
-            </Button>
-          </div>
-        </div>
+    <div className="p-6 space-y-4">
+      {/* Header + KPIs */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Balance</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {formatCOP(stats.balance)}
+          </CardContent>
+        </Card>
 
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Ingresos</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {formatCOP(stats.ingresos)}
+          </CardContent>
+        </Card>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="stat-card bg-gradient-to-br from-primary/10 to-primary/5">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-xl bg-primary/20">
-                <Wallet className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Total Filtrado</p>
-                <p className="text-xl font-bold text-primary">{formatCurrency(stats.total)}</p>
-              </div>
-            </div>
-          </div>
-          <div className="stat-card bg-gradient-to-br from-secondary/50 to-secondary/30">
-            <div className="flex items-center gap-3">
-              <div className="p-3 rounded-xl bg-muted">
-                <Calendar className="w-5 h-5 text-muted-foreground" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Registros</p>
-                <p className="text-xl font-bold">{stats.count}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Egresos</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {formatCOP(stats.egresos)}
+          </CardContent>
+        </Card>
 
-        {/* Filters */}
-        <div className="stat-card space-y-4">
-          {/* Search and Toggle */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Movimientos</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {stats.count.toLocaleString("es-CO")}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Caja Consorcio</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-5">
+            <div className="md:col-span-2">
+              <label className="text-sm text-muted-foreground">Buscar</label>
               <Input
-                type="text"
-                placeholder="Búsqueda rápida..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="concepto, pagado a, negocio, observaciones…"
               />
             </div>
-            <Button 
-              variant={showFilters ? "default" : "outline"}
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center gap-2"
-            >
-              <Filter className="w-4 h-4" />
-              Filtros avanzados
-            </Button>
-            {hasActiveFilters && (
-              <Button variant="ghost" onClick={clearFilters} className="flex items-center gap-2">
-                <X className="w-4 h-4" />
-                Limpiar
-              </Button>
-            )}
-          </div>
 
-          {/* Advanced Filters */}
-          {showFilters && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pt-4 border-t border-border">
-              {/* Fecha Desde */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Fecha Desde</label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !fechaDesde && "text-muted-foreground"
-                      )}
-                    >
-                      <Calendar className="mr-2 h-4 w-4" />
-                      {fechaDesde ? format(fechaDesde, "dd/MM/yyyy", { locale: es }) : "Seleccionar"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <CalendarComponent
-                      mode="single"
-                      selected={fechaDesde}
-                      onSelect={setFechaDesde}
-                      initialFocus
-                      className="p-3 pointer-events-auto"
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              {/* Fecha Hasta */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Fecha Hasta</label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !fechaHasta && "text-muted-foreground"
-                      )}
-                    >
-                      <Calendar className="mr-2 h-4 w-4" />
-                      {fechaHasta ? format(fechaHasta, "dd/MM/yyyy", { locale: es }) : "Seleccionar"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <CalendarComponent
-                      mode="single"
-                      selected={fechaHasta}
-                      onSelect={setFechaHasta}
-                      initialFocus
-                      className="p-3 pointer-events-auto"
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              {/* Concepto */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Concepto</label>
-                <Input
-                  placeholder="Filtrar por concepto..."
-                  value={concepto}
-                  onChange={(e) => setConcepto(e.target.value)}
-                />
-              </div>
-
-              {/* Pagado A */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Pagado A</label>
-                <Input
-                  placeholder="Filtrar por pagado a..."
-                  value={pagadoA}
-                  onChange={(e) => setPagadoA(e.target.value)}
-                />
-              </div>
-
-              {/* Tercer Destino Giro */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Tercer Destino Giro</label>
-                <Input
-                  placeholder="Filtrar por tercer destino..."
-                  value={tercerDestino}
-                  onChange={(e) => setTercerDestino(e.target.value)}
-                />
-              </div>
-
-              {/* Negocio */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Negocio</label>
-                <Input
-                  placeholder="Filtrar por negocio..."
-                  value={negocio}
-                  onChange={(e) => setNegocio(e.target.value)}
-                />
-              </div>
-
-              {/* Observaciones */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Observaciones</label>
-                <Input
-                  placeholder="Filtrar por observaciones..."
-                  value={observaciones}
-                  onChange={(e) => setObservaciones(e.target.value)}
-                />
-              </div>
-
-              {/* Valor Mínimo */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Valor Mínimo</label>
-                <Input
-                  type="number"
-                  placeholder="Mínimo..."
-                  value={valorMin}
-                  onChange={(e) => setValorMin(e.target.value)}
-                />
-              </div>
-
-              {/* Valor Máximo */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground">Valor Máximo</label>
-                <Input
-                  type="number"
-                  placeholder="Máximo..."
-                  value={valorMax}
-                  onChange={(e) => setValorMax(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Table */}
-        <div className="stat-card overflow-hidden p-0">
-          <div className="overflow-x-auto max-w-full">
-            <table className="w-full min-w-[1200px]">
-              <thead>
-                {/* Filter Row */}
-                <tr className="border-b border-border bg-muted/30">
-                  <th className="py-2 px-4 min-w-[140px]">
-                    <Input
-                      type="date"
-                      placeholder="Desde..."
-                      value={fechaDesde ? format(fechaDesde, "yyyy-MM-dd") : ""}
-                      onChange={(e) => setFechaDesde(e.target.value ? new Date(e.target.value) : undefined)}
-                      className="h-8 text-xs"
-                    />
-                  </th>
-                  <th className="py-2 px-4 min-w-[180px]">
-                    <Input
-                      placeholder="Concepto..."
-                      value={concepto}
-                      onChange={(e) => setConcepto(e.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </th>
-                  <th className="py-2 px-4 min-w-[160px]">
-                    <Input
-                      placeholder="Pagado a..."
-                      value={pagadoA}
-                      onChange={(e) => setPagadoA(e.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </th>
-                  <th className="py-2 px-4 min-w-[160px]">
-                    <Input
-                      placeholder="Tercer destino..."
-                      value={tercerDestino}
-                      onChange={(e) => setTercerDestino(e.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </th>
-                  <th className="py-2 px-4 min-w-[140px]">
-                    <Input
-                      placeholder="Negocio..."
-                      value={negocio}
-                      onChange={(e) => setNegocio(e.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </th>
-                  <th className="py-2 px-4 min-w-[180px]">
-                    <Input
-                      placeholder="Observaciones..."
-                      value={observaciones}
-                      onChange={(e) => setObservaciones(e.target.value)}
-                      className="h-8 text-xs"
-                    />
-                  </th>
-                  <th className="py-2 px-4 min-w-[120px]">
-                    <div className="flex gap-1">
-                      <Input
-                        type="number"
-                        placeholder="Min"
-                        value={valorMin}
-                        onChange={(e) => setValorMin(e.target.value)}
-                        className="h-8 text-xs w-16"
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Max"
-                        value={valorMax}
-                        onChange={(e) => setValorMax(e.target.value)}
-                        className="h-8 text-xs w-16"
-                      />
-                    </div>
-                  </th>
-                </tr>
-                {/* Header Row */}
-                <tr className="border-b border-border bg-secondary/50">
-                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Fecha</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Concepto</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Pagado A</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Tercer Destino</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Negocio</th>
-                  <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Observaciones</th>
-                  <th className="text-right py-3 px-4 text-sm font-medium text-muted-foreground whitespace-nowrap">Valor</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMovs.map((mov) => (
-                  <tr key={mov.registro_id} className="border-b border-border hover:bg-secondary/30 transition-colors">
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                        <span className="text-sm">
-                          {mov.fecha ? new Date(mov.fecha).toLocaleDateString('es-CO') : '-'}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 font-medium max-w-[200px] truncate">{mov.concepto || '-'}</td>
-                    <td className="py-3 px-4 text-sm text-muted-foreground max-w-[180px] truncate">{mov.pagado_a || '-'}</td>
-                    <td className="py-3 px-4 text-sm text-muted-foreground max-w-[180px] truncate">{mov.tercer_destino_giro || '-'}</td>
-                    <td className="py-3 px-4 text-sm text-muted-foreground max-w-[160px] truncate">{mov.negocio || '-'}</td>
-                    <td className="py-3 px-4 text-sm text-muted-foreground max-w-[200px] truncate">{mov.observaciones || '-'}</td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <span className="font-semibold text-foreground">
-                        {formatCurrency(mov.valor_num || 0)}
-                      </span>
-                    </td>
-                  </tr>
+            <div>
+              <label className="text-sm text-muted-foreground">Negocio</label>
+              <select
+                className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+                value={negocio}
+                onChange={(e) => setNegocio(e.target.value)}
+              >
+                <option value="ALL">Todos</option>
+                {negocios.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </select>
+            </div>
 
-        {filteredMovs.length === 0 && (
-          <div className="stat-card text-center py-12">
-            <p className="text-muted-foreground">No se encontraron movimientos</p>
+            <div>
+              <label className="text-sm text-muted-foreground">Desde</label>
+              <input
+                className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-muted-foreground">Hasta</label>
+              <input
+                className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+              />
+            </div>
           </div>
-        )}
-      </div>
-    </MainLayout>
+
+          <div className="flex flex-wrap gap-2 items-center justify-between">
+            <div className="flex flex-wrap gap-2 items-center">
+              <Button
+                variant={sortDir === "desc" ? "default" : "outline"}
+                onClick={() => setSortDir("desc")}
+              >
+                Fecha ↓
+              </Button>
+              <Button
+                variant={sortDir === "asc" ? "default" : "outline"}
+                onClick={() => setSortDir("asc")}
+              >
+                Fecha ↑
+              </Button>
+
+              <Button
+                variant={onlyNegatives ? "default" : "outline"}
+                onClick={() => setOnlyNegatives((v) => !v)}
+              >
+                Solo egresos
+              </Button>
+
+              <Badge variant="secondary">
+                Mostrando {paged.length} de {filtered.length}
+              </Badge>
+            </div>
+
+            <div className="flex flex-wrap gap-2 items-center">
+              <select
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+              >
+                <option value={25}>25 / pág</option>
+                <option value={50}>50 / pág</option>
+                <option value={100}>100 / pág</option>
+                <option value={200}>200 / pág</option>
+              </select>
+
+              <Button
+                variant="outline"
+                onClick={() =>
+                  downloadCSV(
+                    `caja_consorcio_${new Date()
+                      .toISOString()
+                      .slice(0, 10)}.csv`,
+                    filtered
+                  )
+                }
+              >
+                Exportar CSV
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setSearch("");
+                  setNegocio("ALL");
+                  setOnlyNegatives(false);
+                  setFromDate("");
+                  setToDate("");
+                  setSortDir("desc");
+                  setPage(1);
+                }}
+              >
+                Limpiar filtros
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Table */}
+      <Card>
+        <CardContent className="pt-4">
+          <div className="rounded-md border overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Pagado a</TableHead>
+                  <TableHead>Concepto</TableHead>
+                  <TableHead>Negocio</TableHead>
+                  <TableHead className="text-right">Valor</TableHead>
+                  <TableHead>Obs.</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                {paged.map((r, idx) => {
+                  const v = Number(r.valor_num ?? 0);
+                  const isNeg = Number.isFinite(v) && v < 0;
+
+                  return (
+                    <TableRow key={r.registro_id ?? `${idx}`}>
+                      <TableCell className="whitespace-nowrap">
+                        {r.fecha ?? "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[220px] truncate">
+                        {r.pagado_a ?? "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[320px] truncate">
+                        {r.concepto ?? "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[180px] truncate">
+                        {r.negocio ?? "—"}
+                      </TableCell>
+                      <TableCell
+                        className={[
+                          "text-right font-medium whitespace-nowrap",
+                          isNeg ? "text-red-600" : "text-foreground",
+                        ].join(" ")}
+                        title={r.valor ?? undefined}
+                      >
+                        {Number.isFinite(v) ? formatCOP(v) : (r.valor ?? "—")}
+                      </TableCell>
+                      <TableCell className="max-w-[320px] truncate">
+                        {r.observaciones ?? "—"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+
+                {paged.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-10">
+                      No hay movimientos con esos filtros.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Pagination controls */}
+          <div className="flex items-center justify-between mt-4 gap-2">
+            <div className="text-sm text-muted-foreground">
+              Página {safePage} de {totalPages}
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                disabled={safePage <= 1}
+                onClick={() => setPage(1)}
+              >
+                « Primero
+              </Button>
+              <Button
+                variant="outline"
+                disabled={safePage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                ‹ Anterior
+              </Button>
+              <Button
+                variant="outline"
+                disabled={safePage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Siguiente ›
+              </Button>
+              <Button
+                variant="outline"
+                disabled={safePage >= totalPages}
+                onClick={() => setPage(totalPages)}
+              >
+                Último »
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
