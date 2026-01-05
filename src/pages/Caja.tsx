@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useCajaConsorcio } from "@/hooks/useCajaConsorcio";
 
-// Componentes UI (shadcn). Si alguno no existe en tu proyecto, reemplázalo por HTML básico.
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -29,11 +28,18 @@ type CajaRow = {
   updated_at?: string;
 };
 
-function toDateMs(yyyyMmDd?: string): number | null {
-  if (!yyyyMmDd) return null;
-  const iso = `${yyyyMmDd}T00:00:00.000Z`;
-  const ms = Date.parse(iso);
-  return Number.isFinite(ms) ? ms : null;
+type SortKey =
+  | "registro_id"
+  | "fecha"
+  | "pagado_a"
+  | "concepto"
+  | "negocio"
+  | "valor_num";
+
+function toDateMs(yyyyMmDd?: string): number {
+  if (!yyyyMmDd) return 0;
+  const ms = Date.parse(`${yyyyMmDd}T00:00:00.000Z`);
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function formatCOP(n: number): string {
@@ -57,109 +63,122 @@ function initials(name?: string) {
   return parts.map((p) => (p[0] ?? "").toUpperCase()).join("");
 }
 
-export default function Caja() {
-  // ✅ Normalización robusta del hook (evita que se “pierdan datos” por destructuring)
-  const caja = useCajaConsorcio() as any;
+function exportCsv(rows: CajaRow[]) {
+  const headers = [
+    "registro_id",
+    "fecha",
+    "pagado_a",
+    "concepto",
+    "negocio",
+    "valor_num",
+    "observaciones",
+    "updated_at",
+  ];
 
-  // Soporta hooks que devuelven rows o data (react-query / supabase patterns)
-  const rows = (caja?.rows ?? caja?.data ?? caja?.caja ?? []) as CajaRow[];
-  const loading = Boolean(
+  const lines = [
+    headers.join(","),
+    ...rows.map((r) =>
+      headers
+        .map((h) => {
+          const val = (r as any)[h] ?? "";
+          const s = String(val).replace(/"/g, '""');
+          return `"${s}"`;
+        })
+        .join(",")
+    ),
+  ];
+
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `caja_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function Caja() {
+  // ✅ Normalización del hook para que NO “desaparezcan” los datos
+  const caja: any = useCajaConsorcio();
+
+  const rows: CajaRow[] = (caja?.rows ?? caja?.data ?? caja?.caja ?? []) as CajaRow[];
+  const loading: boolean = Boolean(
     caja?.loading ?? caja?.isLoading ?? caja?.isFetching ?? caja?.fetching
   );
-  const error = caja?.error ?? caja?.err ?? null;
-  const refetch = (caja?.refetch ??
-    caja?.reload ??
-    caja?.refresh ??
-    (() => {})) as () => void;
+  const error: any = caja?.error ?? caja?.err ?? null;
+  const refetch: (() => void) | undefined = caja?.refetch ?? caja?.reload ?? caja?.refresh;
 
-  // DEBUG opcional (deja esto 1-2 pruebas y luego bórralo)
-  // console.log("CAJA HOOK:", caja);
-  // console.log("ROWS:", rows?.length, rows?.[0]);
-
-  // Filtros
+  // -------------------------
+  // UI state
+  // -------------------------
   const [search, setSearch] = useState("");
   const [negocio, setNegocio] = useState("");
   const [onlyNegatives, setOnlyNegatives] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
-  // Rango de fechas (input type="date")
-  const [fromDate, setFromDate] = useState<string>("");
-  const [toDate, setToDate] = useState<string>("");
-
-  // Orden (click en encabezados tipo ORDER BY)
-  type SortKey =
-    | "registro_id"
-    | "fecha"
-    | "pagado_a"
-    | "concepto"
-    | "negocio"
-    | "valor_num";
   const [sortKey, setSortKey] = useState<SortKey>("fecha");
-  const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  // Paginación
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
   const onSort = (key: SortKey) => {
     setPage(1);
-    setSortKey((prev) => {
-      if (prev === key) {
-        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-        return prev;
-      }
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
       setSortDir("desc");
-      return key;
-    });
+    }
   };
 
-  // Reset page cuando cambian filtros/orden
-  React.useEffect(() => {
+  useEffect(() => {
     setPage(1);
-  }, [search, negocio, onlyNegatives, fromDate, toDate, pageSize, sortKey, sortDir]);
+  }, [search, negocio, onlyNegatives, fromDate, toDate, sortKey, sortDir, pageSize]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const neg = negocio.trim().toLowerCase();
-    const fromMs = toDateMs(fromDate) ?? null;
-    const toMs = toDateMs(toDate) ?? null;
+    const fromMs = fromDate ? toDateMs(fromDate) : null;
+    const toMs = toDate ? toDateMs(toDate) : null;
 
-    const out = (rows ?? []).filter((r: CajaRow) => {
-      const txt = `${r.registro_id ?? ""} ${r.fecha ?? ""} ${r.pagado_a ?? ""} ${
-        r.concepto ?? ""
-      } ${r.negocio ?? ""} ${r.valor ?? ""} ${r.observaciones ?? ""}`.toLowerCase();
-
-      if (q && !txt.includes(q)) return false;
+    const out = (rows ?? []).filter((r) => {
+      // negocio (si escriben algo)
       if (neg && (r.negocio ?? "").toLowerCase() !== neg) return false;
 
+      // negativos
       const v = Number(r.valor_num ?? 0);
       if (onlyNegatives && !(Number.isFinite(v) && v < 0)) return false;
 
-      // filtro fechas
+      // fecha
       if (fromMs !== null || toMs !== null) {
-        const f = toDateMs(r.fecha) ?? null;
-        if (f === null) return false;
+        const f = toDateMs(r.fecha);
+        if (!f) return false;
         if (fromMs !== null && f < fromMs) return false;
         if (toMs !== null && f > toMs) return false;
       }
 
-      return true;
+      // búsqueda
+      if (!q) return true;
+      const hay = `${r.registro_id ?? ""} ${r.fecha ?? ""} ${r.pagado_a ?? ""} ${
+        r.concepto ?? ""
+      } ${r.negocio ?? ""} ${r.valor ?? ""} ${r.observaciones ?? ""}`.toLowerCase();
+      return hay.includes(q);
     });
 
-    // Orden dinámico (tipo SQL ORDER BY)
-    out.sort((a, b) => {
-      const dir = sortDir === "asc" ? 1 : -1;
+    // sort
+    const dir = sortDir === "asc" ? 1 : -1;
 
+    out.sort((a, b) => {
       const cmpStr = (x?: string, y?: string) =>
         (x ?? "").localeCompare(y ?? "", "es", { sensitivity: "base" }) * dir;
 
       const cmpNum = (x?: number | null, y?: number | null) =>
         (Number(x ?? 0) - Number(y ?? 0)) * dir;
 
-      const cmpDate = (x?: string, y?: string) => {
-        const xm = toDateMs(x) ?? 0;
-        const ym = toDateMs(y) ?? 0;
-        return (xm - ym) * dir;
-      };
+      const cmpDate = (x?: string, y?: string) =>
+        (toDateMs(x) - toDateMs(y)) * dir;
 
       switch (sortKey) {
         case "registro_id":
@@ -192,7 +211,7 @@ export default function Caja() {
       if (!Number.isFinite(v)) continue;
       balance += v;
       if (v >= 0) ingresos += v;
-      else egresos += v; // negativo
+      else egresos += v;
     }
 
     return { count: filtered.length, ingresos, egresos, balance };
@@ -200,11 +219,9 @@ export default function Caja() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(Math.max(1, page), totalPages);
-
   const paged = useMemo(() => {
     const start = (safePage - 1) * pageSize;
-    const end = start + pageSize;
-    return filtered.slice(start, end);
+    return filtered.slice(start, start + pageSize);
   }, [filtered, safePage, pageSize]);
 
   const SortHead = ({
@@ -233,38 +250,26 @@ export default function Caja() {
     );
   };
 
-  function exportCsv() {
-    const headers = [
-      "registro_id",
-      "fecha",
-      "pagado_a",
-      "concepto",
-      "negocio",
-      "valor_num",
-      "observaciones",
-      "updated_at",
-    ];
-
-    const lines = [
-      headers.join(","),
-      ...filtered.map((r) =>
-        headers
-          .map((h) => {
-            const val = (r as any)[h] ?? "";
-            const s = String(val).replace(/"/g, '""');
-            return `"${s}"`;
-          })
-          .join(",")
-      ),
-    ];
-
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `caja_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  // -------------------------
+  // UI
+  // -------------------------
+  
+  if (error) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Caja</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="text-red-600">Error cargando la información.</div>
+            <pre className="text-xs whitespace-pre-wrap break-words bg-muted p-3 rounded">
+              {String(error?.message ?? error)}
+            </pre>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -273,17 +278,21 @@ export default function Caja() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Caja</CardTitle>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={exportCsv} disabled={loading}>
+            <Button variant="outline" onClick={() => exportCsv(filtered)} disabled={loading}>
               Exportar CSV
             </Button>
-            <Button variant="outline" onClick={refetch} disabled={loading}>
+            <Button
+              variant="outline"
+              onClick={() => (refetch ? refetch() : undefined)}
+              disabled={loading || !refetch}
+              title={!refetch ? "Tu hook no expone refetch()" : "Actualizar"}
+            >
               Actualizar
             </Button>
           </div>
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {/* Stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <Card className="shadow-none">
               <CardContent className="pt-4">
@@ -314,14 +323,6 @@ export default function Caja() {
             </Card>
           </div>
 
-          {/* Error */}
-          {error && (
-            <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-              Error cargando caja: {String(error)}
-            </div>
-          )}
-
-          {/* Filters */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">Buscar</label>
@@ -403,7 +404,6 @@ export default function Caja() {
         </CardContent>
       </Card>
 
-      {/* Table */}
       <Card>
         <CardContent className="pt-4">
           <div className="rounded-md border overflow-auto">
@@ -426,7 +426,7 @@ export default function Caja() {
                   const isNeg = Number.isFinite(v) && v < 0;
 
                   return (
-                    <TableRow key={r.registro_id ?? `${idx}`}>
+                    <TableRow key={r.registro_id ?? String(idx)}>
                       <TableCell className="whitespace-nowrap font-mono text-xs">
                         {r.registro_id ?? "—"}
                       </TableCell>
@@ -445,7 +445,6 @@ export default function Caja() {
                       </TableCell>
 
                       <TableCell className="max-w-[320px] truncate">{r.concepto ?? "—"}</TableCell>
-
                       <TableCell className="max-w-[180px] truncate">{r.negocio ?? "—"}</TableCell>
 
                       <TableCell
@@ -476,7 +475,6 @@ export default function Caja() {
             </Table>
           </div>
 
-          {/* Pagination controls */}
           <div className="flex items-center justify-between mt-4 gap-2">
             <div className="text-sm text-muted-foreground">{loading ? "Cargando..." : "Listo"}</div>
 
