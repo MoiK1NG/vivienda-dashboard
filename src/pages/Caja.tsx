@@ -450,7 +450,7 @@ export default function Caja() {
                       <TableCell
                         className={[
                           "text-right font-medium whitespace-nowrap",
-                          isNeg ? "text-red-600" : "text-foreground",
+                          isNeg ? "text-red-600" : v > 0 ? "text-green-600" : "text-foreground",
                         ].join(" ")}
                         title={r.valor ?? undefined}
                       >
