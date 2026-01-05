@@ -1,8 +1,9 @@
+"use client";
+
 import React, { useMemo, useState } from "react";
 import { useCajaConsorcio } from "@/hooks/useCajaConsorcio";
 
-// Si tienes componentes UI (shadcn) en tu repo, úsalos.
-// Si alguno no existe, puedes reemplazar por <div>, <button>, <input> sin problema.
+// Componentes UI (shadcn). Si alguno no existe en tu proyecto, reemplázalo por HTML básico.
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ type CajaRow = {
   fecha?: string; // "YYYY-MM-DD"
   pagado_a?: string;
   concepto?: string;
-  valor?: string; // texto (opcional)
+  valor?: string;
   valor_num?: number | null;
   negocio?: string;
   observaciones?: string;
@@ -30,7 +31,6 @@ type CajaRow = {
 
 function toDateMs(yyyyMmDd?: string): number | null {
   if (!yyyyMmDd) return null;
-  // Forzamos medianoche UTC para comparación consistente
   const iso = `${yyyyMmDd}T00:00:00.000Z`;
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? ms : null;
@@ -44,7 +44,6 @@ function formatCOP(n: number): string {
       maximumFractionDigits: 0,
     }).format(n);
   } catch {
-    // fallback
     const sign = n < 0 ? "-" : "";
     const abs = Math.abs(n);
     return `${sign}$${abs.toLocaleString("es-CO")}`;
@@ -59,7 +58,23 @@ function initials(name?: string) {
 }
 
 export default function Caja() {
-  const { rows, loading, error, refetch } = useCajaConsorcio();
+  // ✅ Normalización robusta del hook (evita que se “pierdan datos” por destructuring)
+  const caja = useCajaConsorcio() as any;
+
+  // Soporta hooks que devuelven rows o data (react-query / supabase patterns)
+  const rows = (caja?.rows ?? caja?.data ?? caja?.caja ?? []) as CajaRow[];
+  const loading = Boolean(
+    caja?.loading ?? caja?.isLoading ?? caja?.isFetching ?? caja?.fetching
+  );
+  const error = caja?.error ?? caja?.err ?? null;
+  const refetch = (caja?.refetch ??
+    caja?.reload ??
+    caja?.refresh ??
+    (() => {})) as () => void;
+
+  // DEBUG opcional (deja esto 1-2 pruebas y luego bórralo)
+  // console.log("CAJA HOOK:", caja);
+  // console.log("ROWS:", rows?.length, rows?.[0]);
 
   // Filtros
   const [search, setSearch] = useState("");
@@ -97,7 +112,7 @@ export default function Caja() {
     });
   };
 
-  // Reset page cuando cambian filtros
+  // Reset page cuando cambian filtros/orden
   React.useEffect(() => {
     setPage(1);
   }, [search, negocio, onlyNegatives, fromDate, toDate, pageSize, sortKey, sortDir]);
@@ -122,7 +137,7 @@ export default function Caja() {
       // filtro fechas
       if (fromMs !== null || toMs !== null) {
         const f = toDateMs(r.fecha) ?? null;
-        if (f === null) return false; // si no hay fecha y estamos filtrando por fecha
+        if (f === null) return false;
         if (fromMs !== null && f < fromMs) return false;
         if (toMs !== null && f > toMs) return false;
       }
@@ -180,12 +195,7 @@ export default function Caja() {
       else egresos += v; // negativo
     }
 
-    return {
-      count: filtered.length,
-      ingresos,
-      egresos,
-      balance,
-    };
+    return { count: filtered.length, ingresos, egresos, balance };
   }, [filtered]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -263,7 +273,7 @@ export default function Caja() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Caja</CardTitle>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={exportCsv}>
+            <Button variant="outline" onClick={exportCsv} disabled={loading}>
               Exportar CSV
             </Button>
             <Button variant="outline" onClick={refetch} disabled={loading}>
@@ -281,18 +291,21 @@ export default function Caja() {
                 <div className="text-2xl font-bold">{stats.count}</div>
               </CardContent>
             </Card>
+
             <Card className="shadow-none">
               <CardContent className="pt-4">
                 <div className="text-sm text-muted-foreground">Ingresos</div>
                 <div className="text-2xl font-bold">{formatCOP(stats.ingresos)}</div>
               </CardContent>
             </Card>
+
             <Card className="shadow-none">
               <CardContent className="pt-4">
                 <div className="text-sm text-muted-foreground">Egresos</div>
                 <div className="text-2xl font-bold">{formatCOP(stats.egresos)}</div>
               </CardContent>
             </Card>
+
             <Card className="shadow-none">
               <CardContent className="pt-4">
                 <div className="text-sm text-muted-foreground">Balance</div>
@@ -313,7 +326,7 @@ export default function Caja() {
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">Buscar</label>
               <Input
-                placeholder="Buscar por registro, pagado a, concepto, negocio..."
+                placeholder="Buscar por registro, pagado a, concepto..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -418,9 +431,7 @@ export default function Caja() {
                         {r.registro_id ?? "—"}
                       </TableCell>
 
-                      <TableCell className="whitespace-nowrap">
-                        {r.fecha ?? "—"}
-                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{r.fecha ?? "—"}</TableCell>
 
                       <TableCell title={r.pagado_a ?? ""}>
                         <div className="flex items-center gap-2 min-w-0">
@@ -428,20 +439,14 @@ export default function Caja() {
                             {initials(r.pagado_a)}
                           </div>
                           <div className="min-w-0">
-                            <div className="truncate max-w-[220px]">
-                              {r.pagado_a ?? "—"}
-                            </div>
+                            <div className="truncate max-w-[220px]">{r.pagado_a ?? "—"}</div>
                           </div>
                         </div>
                       </TableCell>
 
-                      <TableCell className="max-w-[320px] truncate">
-                        {r.concepto ?? "—"}
-                      </TableCell>
+                      <TableCell className="max-w-[320px] truncate">{r.concepto ?? "—"}</TableCell>
 
-                      <TableCell className="max-w-[180px] truncate">
-                        {r.negocio ?? "—"}
-                      </TableCell>
+                      <TableCell className="max-w-[180px] truncate">{r.negocio ?? "—"}</TableCell>
 
                       <TableCell
                         className={[
@@ -463,7 +468,7 @@ export default function Caja() {
                 {paged.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center py-10">
-                      No hay movimientos con esos filtros.
+                      {loading ? "Cargando movimientos..." : "No hay movimientos con esos filtros."}
                     </TableCell>
                   </TableRow>
                 )}
@@ -473,16 +478,10 @@ export default function Caja() {
 
           {/* Pagination controls */}
           <div className="flex items-center justify-between mt-4 gap-2">
-            <div className="text-sm text-muted-foreground">
-              {loading ? "Cargando..." : "Listo"}
-            </div>
+            <div className="text-sm text-muted-foreground">{loading ? "Cargando..." : "Listo"}</div>
 
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                disabled={safePage <= 1}
-                onClick={() => setPage(1)}
-              >
+              <Button variant="outline" disabled={safePage <= 1} onClick={() => setPage(1)}>
                 « Primero
               </Button>
               <Button
@@ -504,11 +503,7 @@ export default function Caja() {
               >
                 Siguiente ›
               </Button>
-              <Button
-                variant="outline"
-                disabled={safePage >= totalPages}
-                onClick={() => setPage(totalPages)}
-              >
+              <Button variant="outline" disabled={safePage >= totalPages} onClick={() => setPage(totalPages)}>
                 Último »
               </Button>
             </div>
@@ -518,7 +513,3 @@ export default function Caja() {
     </div>
   );
 }
-
-
-
-
