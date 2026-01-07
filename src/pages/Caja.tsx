@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useCajaConsorcio } from "@/hooks/useCajaConsorcio";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,16 +15,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from "recharts";
 
 type CajaRow = {
   registro_id?: string;
-  fecha?: string; // "YYYY-MM-DD"
+  fecha?: string;
   pagado_a?: string;
   concepto?: string;
   valor?: string;
   valor_num?: number | null;
   negocio?: string;
   observaciones?: string;
+  tipo_gasto?: string;
+  subgasto?: string;
   updated_at?: string;
 };
 
@@ -34,7 +48,9 @@ type SortKey =
   | "pagado_a"
   | "concepto"
   | "negocio"
-  | "valor_num";
+  | "valor_num"
+  | "tipo_gasto"
+  | "subgasto";
 
 function toDateMs(yyyyMmDd?: string): number {
   if (!yyyyMmDd) return 0;
@@ -70,6 +86,8 @@ function exportCsv(rows: CajaRow[]) {
     "pagado_a",
     "concepto",
     "negocio",
+    "tipo_gasto",
+    "subgasto",
     "valor_num",
     "observaciones",
     "updated_at",
@@ -97,8 +115,20 @@ function exportCsv(rows: CajaRow[]) {
   URL.revokeObjectURL(url);
 }
 
+const COLORS = [
+  "#0088FE",
+  "#00C49F",
+  "#FFBB28",
+  "#FF8042",
+  "#8884d8",
+  "#82ca9d",
+  "#ffc658",
+  "#d84c73",
+  "#8dd1e1",
+  "#a4de6c",
+];
+
 export default function Caja() {
-  // ✅ Normalización del hook para que NO “desaparezcan” los datos
   const caja: any = useCajaConsorcio();
 
   const rows: CajaRow[] = (caja?.rows ?? caja?.data ?? caja?.caja ?? []) as CajaRow[];
@@ -108,11 +138,11 @@ export default function Caja() {
   const error: any = caja?.error ?? caja?.err ?? null;
   const refetch: (() => void) | undefined = caja?.refetch ?? caja?.reload ?? caja?.refresh;
 
-  // -------------------------
-  // UI state
-  // -------------------------
+  // Filters
   const [search, setSearch] = useState("");
   const [negocio, setNegocio] = useState("");
+  const [tipoGasto, setTipoGasto] = useState("");
+  const [subgasto, setSubgasto] = useState("");
   const [onlyNegatives, setOnlyNegatives] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -122,6 +152,8 @@ export default function Caja() {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+
+  const [showCharts, setShowCharts] = useState(true);
 
   const onSort = (key: SortKey) => {
     setPage(1);
@@ -133,25 +165,22 @@ export default function Caja() {
     }
   };
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, negocio, onlyNegatives, fromDate, toDate, sortKey, sortDir, pageSize]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const neg = negocio.trim().toLowerCase();
+    const tg = tipoGasto.trim().toLowerCase();
+    const sg = subgasto.trim().toLowerCase();
     const fromMs = fromDate ? toDateMs(fromDate) : null;
     const toMs = toDate ? toDateMs(toDate) : null;
 
     const out = (rows ?? []).filter((r) => {
-      // negocio (si escriben algo)
-      if (neg && (r.negocio ?? "").toLowerCase() !== neg) return false;
+      if (neg && !(r.negocio ?? "").toLowerCase().includes(neg)) return false;
+      if (tg && !(r.tipo_gasto ?? "").toLowerCase().includes(tg)) return false;
+      if (sg && !(r.subgasto ?? "").toLowerCase().includes(sg)) return false;
 
-      // negativos
       const v = Number(r.valor_num ?? 0);
       if (onlyNegatives && !(Number.isFinite(v) && v < 0)) return false;
 
-      // fecha
       if (fromMs !== null || toMs !== null) {
         const f = toDateMs(r.fecha);
         if (!f) return false;
@@ -159,15 +188,13 @@ export default function Caja() {
         if (toMs !== null && f > toMs) return false;
       }
 
-      // búsqueda
       if (!q) return true;
       const hay = `${r.registro_id ?? ""} ${r.fecha ?? ""} ${r.pagado_a ?? ""} ${
         r.concepto ?? ""
-      } ${r.negocio ?? ""} ${r.valor ?? ""} ${r.observaciones ?? ""}`.toLowerCase();
+      } ${r.negocio ?? ""} ${r.tipo_gasto ?? ""} ${r.subgasto ?? ""} ${r.valor ?? ""} ${r.observaciones ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
 
-    // sort
     const dir = sortDir === "asc" ? 1 : -1;
 
     out.sort((a, b) => {
@@ -177,8 +204,7 @@ export default function Caja() {
       const cmpNum = (x?: number | null, y?: number | null) =>
         (Number(x ?? 0) - Number(y ?? 0)) * dir;
 
-      const cmpDate = (x?: string, y?: string) =>
-        (toDateMs(x) - toDateMs(y)) * dir;
+      const cmpDate = (x?: string, y?: string) => (toDateMs(x) - toDateMs(y)) * dir;
 
       switch (sortKey) {
         case "registro_id":
@@ -191,6 +217,10 @@ export default function Caja() {
           return cmpStr(a.concepto, b.concepto);
         case "negocio":
           return cmpStr(a.negocio, b.negocio);
+        case "tipo_gasto":
+          return cmpStr(a.tipo_gasto, b.tipo_gasto);
+        case "subgasto":
+          return cmpStr(a.subgasto, b.subgasto);
         case "valor_num":
           return cmpNum(a.valor_num, b.valor_num) || cmpStr(a.registro_id, b.registro_id);
         default:
@@ -199,7 +229,7 @@ export default function Caja() {
     });
 
     return out;
-  }, [rows, search, negocio, onlyNegatives, fromDate, toDate, sortKey, sortDir]);
+  }, [rows, search, negocio, tipoGasto, subgasto, onlyNegatives, fromDate, toDate, sortKey, sortDir]);
 
   const stats = useMemo(() => {
     let ingresos = 0;
@@ -215,6 +245,53 @@ export default function Caja() {
     }
 
     return { count: filtered.length, ingresos, egresos, balance };
+  }, [filtered]);
+
+  // Chart data: Gastos por tipo_gasto
+  const gastosPorTipo = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of filtered) {
+      const v = Number(r.valor_num ?? 0);
+      if (v >= 0) continue; // Solo egresos
+      const key = r.tipo_gasto?.trim() || "Sin tipo";
+      map.set(key, (map.get(key) ?? 0) + Math.abs(v));
+    }
+    return Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
+  }, [filtered]);
+
+  // Chart data: Gastos por mes
+  const gastosPorMes = useMemo(() => {
+    const map = new Map<string, { ingresos: number; egresos: number }>();
+    for (const r of filtered) {
+      const v = Number(r.valor_num ?? 0);
+      if (!Number.isFinite(v)) continue;
+      const mes = r.fecha?.slice(0, 7) || "Sin fecha";
+      const current = map.get(mes) ?? { ingresos: 0, egresos: 0 };
+      if (v >= 0) current.ingresos += v;
+      else current.egresos += Math.abs(v);
+      map.set(mes, current);
+    }
+    return Array.from(map.entries())
+      .map(([mes, data]) => ({ mes, ...data }))
+      .sort((a, b) => a.mes.localeCompare(b.mes));
+  }, [filtered]);
+
+  // Chart data: Gastos por subgasto
+  const gastosPorSubgasto = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of filtered) {
+      const v = Number(r.valor_num ?? 0);
+      if (v >= 0) continue;
+      const key = r.subgasto?.trim() || "Sin subgasto";
+      map.set(key, (map.get(key) ?? 0) + Math.abs(v));
+    }
+    return Array.from(map.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 10);
   }, [filtered]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -250,10 +327,6 @@ export default function Caja() {
     );
   };
 
-  // -------------------------
-  // UI
-  // -------------------------
-  
   if (error) {
     return (
       <div className="p-6">
@@ -278,6 +351,12 @@ export default function Caja() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Caja</CardTitle>
           <div className="flex items-center gap-2">
+            <Button
+              variant={showCharts ? "default" : "outline"}
+              onClick={() => setShowCharts((v) => !v)}
+            >
+              {showCharts ? "Ocultar gráficos" : "Mostrar gráficos"}
+            </Button>
             <Button variant="outline" onClick={() => exportCsv(filtered)} disabled={loading}>
               Exportar CSV
             </Button>
@@ -304,14 +383,14 @@ export default function Caja() {
             <Card className="shadow-none">
               <CardContent className="pt-4">
                 <div className="text-sm text-muted-foreground">Ingresos</div>
-                <div className="text-2xl font-bold">{formatCOP(stats.ingresos)}</div>
+                <div className="text-2xl font-bold text-green-600">{formatCOP(stats.ingresos)}</div>
               </CardContent>
             </Card>
 
             <Card className="shadow-none">
               <CardContent className="pt-4">
                 <div className="text-sm text-muted-foreground">Egresos</div>
-                <div className="text-2xl font-bold">{formatCOP(stats.egresos)}</div>
+                <div className="text-2xl font-bold text-red-600">{formatCOP(stats.egresos)}</div>
               </CardContent>
             </Card>
 
@@ -323,22 +402,138 @@ export default function Caja() {
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          {/* Charts */}
+          {showCharts && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Gastos por mes */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Ingresos vs Egresos por Mes</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {gastosPorMes.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={gastosPorMes}>
+                        <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
+                        <Tooltip
+                          formatter={(value: number) => formatCOP(value)}
+                          labelFormatter={(label) => `Mes: ${label}`}
+                        />
+                        <Legend />
+                        <Bar dataKey="ingresos" fill="#22c55e" name="Ingresos" />
+                        <Bar dataKey="egresos" fill="#ef4444" name="Egresos" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                      Sin datos
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Gastos por tipo */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Top 10 Gastos por Tipo</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {gastosPorTipo.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <PieChart>
+                        <Pie
+                          data={gastosPorTipo}
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={80}
+                          dataKey="value"
+                          nameKey="name"
+                          label={({ name, percent }) =>
+                            `${name.slice(0, 12)}${name.length > 12 ? "..." : ""} ${(percent * 100).toFixed(0)}%`
+                          }
+                          labelLine={false}
+                        >
+                          {gastosPorTipo.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number) => formatCOP(value)} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                      Sin egresos
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Gastos por subgasto */}
+              <Card className="lg:col-span-2">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Top 10 Gastos por Subgasto</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {gastosPorSubgasto.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={gastosPorSubgasto} layout="vertical">
+                        <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          tick={{ fontSize: 11 }}
+                          width={120}
+                          tickFormatter={(v) => (v.length > 18 ? v.slice(0, 18) + "..." : v)}
+                        />
+                        <Tooltip formatter={(value: number) => formatCOP(value)} />
+                        <Bar dataKey="value" fill="#8884d8" name="Gasto" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                      Sin egresos
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">Buscar</label>
               <Input
-                placeholder="Buscar por registro, pagado a, concepto..."
+                placeholder="Buscar..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               />
             </div>
 
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">Negocio</label>
               <Input
-                placeholder="Ej: Tienda, Administración..."
+                placeholder="Ej: Tienda..."
                 value={negocio}
-                onChange={(e) => setNegocio(e.target.value)}
+                onChange={(e) => { setNegocio(e.target.value); setPage(1); }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">Tipo Gasto</label>
+              <Input
+                placeholder="Ej: Operativo..."
+                value={tipoGasto}
+                onChange={(e) => { setTipoGasto(e.target.value); setPage(1); }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">Subgasto</label>
+              <Input
+                placeholder="Ej: Combustible..."
+                value={subgasto}
+                onChange={(e) => { setSubgasto(e.target.value); setPage(1); }}
               />
             </div>
 
@@ -348,7 +543,7 @@ export default function Caja() {
                 className="w-full h-10 rounded-md border bg-background px-3 text-sm"
                 type="date"
                 value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
+                onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
               />
             </div>
 
@@ -358,7 +553,7 @@ export default function Caja() {
                 className="w-full h-10 rounded-md border bg-background px-3 text-sm"
                 type="date"
                 value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
+                onChange={(e) => { setToDate(e.target.value); setPage(1); }}
               />
             </div>
           </div>
@@ -367,7 +562,7 @@ export default function Caja() {
             <div className="flex flex-wrap gap-2 items-center">
               <Button
                 variant={onlyNegatives ? "default" : "outline"}
-                onClick={() => setOnlyNegatives((v) => !v)}
+                onClick={() => { setOnlyNegatives((v) => !v); setPage(1); }}
               >
                 Solo egresos
               </Button>
@@ -391,7 +586,7 @@ export default function Caja() {
               <select
                 className="h-10 rounded-md border bg-background px-2 text-sm"
                 value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
               >
                 {[25, 50, 100, 200].map((n) => (
                   <option key={n} value={n}>
@@ -406,8 +601,8 @@ export default function Caja() {
 
       <Card>
         <CardContent className="pt-4">
-          <div className="rounded-md border overflow-auto">
-            <Table>
+          <div className="rounded-md border overflow-x-auto">
+            <Table className="min-w-[1400px]">
               <TableHeader>
                 <TableRow>
                   <SortHead label="Registro" k="registro_id" />
@@ -415,6 +610,8 @@ export default function Caja() {
                   <SortHead label="Pagado a" k="pagado_a" />
                   <SortHead label="Concepto" k="concepto" />
                   <SortHead label="Negocio" k="negocio" />
+                  <SortHead label="Tipo Gasto" k="tipo_gasto" />
+                  <SortHead label="Subgasto" k="subgasto" />
                   <SortHead label="Valor" k="valor_num" className="text-right" />
                   <TableHead>Obs.</TableHead>
                 </TableRow>
@@ -439,13 +636,15 @@ export default function Caja() {
                             {initials(r.pagado_a)}
                           </div>
                           <div className="min-w-0">
-                            <div className="truncate max-w-[220px]">{r.pagado_a ?? "—"}</div>
+                            <div className="truncate max-w-[180px]">{r.pagado_a ?? "—"}</div>
                           </div>
                         </div>
                       </TableCell>
 
-                      <TableCell className="max-w-[320px] truncate">{r.concepto ?? "—"}</TableCell>
-                      <TableCell className="max-w-[180px] truncate">{r.negocio ?? "—"}</TableCell>
+                      <TableCell className="max-w-[250px] truncate">{r.concepto ?? "—"}</TableCell>
+                      <TableCell className="max-w-[140px] truncate">{r.negocio ?? "—"}</TableCell>
+                      <TableCell className="max-w-[140px] truncate">{r.tipo_gasto ?? "—"}</TableCell>
+                      <TableCell className="max-w-[140px] truncate">{r.subgasto ?? "—"}</TableCell>
 
                       <TableCell
                         className={[
@@ -457,7 +656,7 @@ export default function Caja() {
                         {Number.isFinite(v) ? formatCOP(v) : r.valor ?? "—"}
                       </TableCell>
 
-                      <TableCell className="max-w-[320px] truncate">
+                      <TableCell className="max-w-[280px] truncate">
                         {r.observaciones ?? "—"}
                       </TableCell>
                     </TableRow>
@@ -466,7 +665,7 @@ export default function Caja() {
 
                 {paged.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10">
+                    <TableCell colSpan={9} className="text-center py-10">
                       {loading ? "Cargando movimientos..." : "No hay movimientos con esos filtros."}
                     </TableCell>
                   </TableRow>
