@@ -8,6 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Table,
   TableBody,
   TableCell,
@@ -26,7 +31,10 @@ import {
   Pie,
   Cell,
   Legend,
+  Line,
+  ComposedChart,
 } from "recharts";
+import { AlertTriangle, ChevronDown, TrendingDown, TrendingUp } from "lucide-react";
 
 type CajaRow = {
   registro_id?: string;
@@ -154,6 +162,7 @@ export default function Caja() {
   const [pageSize, setPageSize] = useState(50);
 
   const [showCharts, setShowCharts] = useState(true);
+  const [showTable, setShowTable] = useState(false);
 
   const onSort = (key: SortKey) => {
     setPage(1);
@@ -236,15 +245,54 @@ export default function Caja() {
     let egresos = 0;
     let balance = 0;
 
+    // Stats by month for comparison
+    const currentDate = new Date();
+    const currentMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, "0")}`;
+    const prevDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+    const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+
+    let currentMonthIngresos = 0;
+    let currentMonthEgresos = 0;
+    let prevMonthIngresos = 0;
+    let prevMonthEgresos = 0;
+
     for (const r of filtered) {
       const v = Number(r.valor_num ?? 0);
       if (!Number.isFinite(v)) continue;
       balance += v;
       if (v >= 0) ingresos += v;
       else egresos += v;
+
+      const mes = r.fecha?.slice(0, 7);
+      if (mes === currentMonth) {
+        if (v >= 0) currentMonthIngresos += v;
+        else currentMonthEgresos += v;
+      } else if (mes === prevMonth) {
+        if (v >= 0) prevMonthIngresos += v;
+        else prevMonthEgresos += v;
+      }
     }
 
-    return { count: filtered.length, ingresos, egresos, balance };
+    const currentMonthResult = currentMonthIngresos + currentMonthEgresos;
+    const prevMonthResult = prevMonthIngresos + prevMonthEgresos;
+
+    // Calculate percentage changes
+    const calcChange = (current: number, prev: number) => {
+      if (prev === 0) return current !== 0 ? 100 : 0;
+      return ((current - prev) / Math.abs(prev)) * 100;
+    };
+
+    return {
+      count: filtered.length,
+      ingresos,
+      egresos,
+      balance,
+      currentMonthResult,
+      ingresosChange: calcChange(currentMonthIngresos, prevMonthIngresos),
+      egresosChange: calcChange(Math.abs(currentMonthEgresos), Math.abs(prevMonthEgresos)),
+      balanceChange: calcChange(balance, balance - currentMonthResult + prevMonthResult),
+      resultChange: calcChange(currentMonthResult, prevMonthResult),
+    };
   }, [filtered]);
 
   // Chart data: Gastos por tipo_gasto
@@ -253,16 +301,17 @@ export default function Caja() {
     for (const r of filtered) {
       const v = Number(r.valor_num ?? 0);
       if (v >= 0) continue; // Solo egresos
-      const key = r.tipo_gasto?.trim() || "Sin tipo";
-      map.set(key, (map.get(key) ?? 0) + Math.abs(v));
+      const key = r.tipo_gasto?.trim() || "";
+      const displayName = key === "" ? "Clasificación pendiente" : key;
+      map.set(displayName, (map.get(displayName) ?? 0) + Math.abs(v));
     }
     return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value }))
+      .map(([name, value]) => ({ name, value, isPending: name === "Clasificación pendiente" }))
       .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
+      .slice(0, 5);
   }, [filtered]);
 
-  // Chart data: Gastos por mes
+  // Chart data: Gastos por mes with cumulative balance
   const gastosPorMes = useMemo(() => {
     const map = new Map<string, { ingresos: number; egresos: number }>();
     for (const r of filtered) {
@@ -274,9 +323,16 @@ export default function Caja() {
       else current.egresos += Math.abs(v);
       map.set(mes, current);
     }
-    return Array.from(map.entries())
+    const sorted = Array.from(map.entries())
       .map(([mes, data]) => ({ mes, ...data }))
       .sort((a, b) => a.mes.localeCompare(b.mes));
+    
+    // Calculate cumulative balance
+    let cumulative = 0;
+    return sorted.map((item) => {
+      cumulative += item.ingresos - item.egresos;
+      return { ...item, balanceAcumulado: cumulative };
+    });
   }, [filtered]);
 
   // Chart data: Gastos por subgasto
@@ -285,13 +341,14 @@ export default function Caja() {
     for (const r of filtered) {
       const v = Number(r.valor_num ?? 0);
       if (v >= 0) continue;
-      const key = r.subgasto?.trim() || "Sin subgasto";
-      map.set(key, (map.get(key) ?? 0) + Math.abs(v));
+      const key = r.subgasto?.trim() || "";
+      const displayName = key === "" ? "Clasificación pendiente" : key;
+      map.set(displayName, (map.get(displayName) ?? 0) + Math.abs(v));
     }
     return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value }))
+      .map(([name, value]) => ({ name, value, isPending: name === "Clasificación pendiente" }))
       .sort((a, b) => b.value - a.value)
-      .slice(0, 10);
+      .slice(0, 5);
   }, [filtered]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -372,126 +429,176 @@ export default function Caja() {
         </CardHeader>
 
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <Card className="shadow-none">
-              <CardContent className="pt-4">
-                <div className="text-sm text-muted-foreground">Movimientos</div>
-                <div className="text-2xl font-bold">{stats.count}</div>
+          {/* KPIs - Reorganized with Balance first */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Balance - Primary KPI */}
+            <Card className="shadow-none border-2 border-primary/30 bg-primary/5">
+              <CardContent className="pt-6 pb-4">
+                <div className="text-sm font-medium text-muted-foreground">Balance Total</div>
+                <div className={`text-3xl font-bold mt-1 ${stats.balance >= 0 ? "text-green-600" : "text-red-600"}`}>
+                  {formatCOP(stats.balance)}
+                </div>
+                <div className={`flex items-center gap-1 text-sm mt-2 ${stats.balanceChange >= 0 ? "text-green-600" : "text-red-600"}`}>
+                  {stats.balanceChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                  <span>{stats.balanceChange >= 0 ? "▲" : "▼"} {Math.abs(stats.balanceChange).toFixed(1)}% vs mes anterior</span>
+                </div>
               </CardContent>
             </Card>
 
+            {/* Ingresos */}
             <Card className="shadow-none">
-              <CardContent className="pt-4">
-                <div className="text-sm text-muted-foreground">Ingresos</div>
-                <div className="text-2xl font-bold text-green-600">{formatCOP(stats.ingresos)}</div>
+              <CardContent className="pt-6 pb-4">
+                <div className="text-sm font-medium text-muted-foreground">Ingresos</div>
+                <div className="text-3xl font-bold text-green-600 mt-1">{formatCOP(stats.ingresos)}</div>
+                <div className={`flex items-center gap-1 text-sm mt-2 ${stats.ingresosChange >= 0 ? "text-green-600" : "text-red-600"}`}>
+                  {stats.ingresosChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                  <span>{stats.ingresosChange >= 0 ? "▲" : "▼"} {Math.abs(stats.ingresosChange).toFixed(1)}% vs mes anterior</span>
+                </div>
               </CardContent>
             </Card>
 
+            {/* Egresos */}
             <Card className="shadow-none">
-              <CardContent className="pt-4">
-                <div className="text-sm text-muted-foreground">Egresos</div>
-                <div className="text-2xl font-bold text-red-600">{formatCOP(stats.egresos)}</div>
+              <CardContent className="pt-6 pb-4">
+                <div className="text-sm font-medium text-muted-foreground">Egresos</div>
+                <div className="text-3xl font-bold text-red-600 mt-1">{formatCOP(stats.egresos)}</div>
+                <div className={`flex items-center gap-1 text-sm mt-2 ${stats.egresosChange <= 0 ? "text-green-600" : "text-red-600"}`}>
+                  {stats.egresosChange <= 0 ? <TrendingDown className="h-4 w-4" /> : <TrendingUp className="h-4 w-4" />}
+                  <span>{stats.egresosChange <= 0 ? "▼" : "▲"} {Math.abs(stats.egresosChange).toFixed(1)}% vs mes anterior</span>
+                </div>
               </CardContent>
             </Card>
 
+            {/* Resultado del Mes */}
             <Card className="shadow-none">
-              <CardContent className="pt-4">
-                <div className="text-sm text-muted-foreground">Balance</div>
-                <div className="text-2xl font-bold">{formatCOP(stats.balance)}</div>
+              <CardContent className="pt-6 pb-4">
+                <div className="text-sm font-medium text-muted-foreground">Resultado del Mes</div>
+                <div className={`text-3xl font-bold mt-1 ${stats.currentMonthResult >= 0 ? "text-green-600" : "text-red-600"}`}>
+                  {formatCOP(stats.currentMonthResult)}
+                </div>
+                <div className={`flex items-center gap-1 text-sm mt-2 ${stats.resultChange >= 0 ? "text-green-600" : "text-red-600"}`}>
+                  {stats.resultChange >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                  <span>{stats.resultChange >= 0 ? "▲" : "▼"} {Math.abs(stats.resultChange).toFixed(1)}% vs mes anterior</span>
+                </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* Charts */}
+          {/* Charts - Reduced height */}
           {showCharts && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Gastos por mes */}
+              {/* Gastos por mes with cumulative balance line */}
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Ingresos vs Egresos por Mes</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {gastosPorMes.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={250}>
-                      <BarChart data={gastosPorMes}>
-                        <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
-                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
+                    <ResponsiveContainer width="100%" height={180}>
+                      <ComposedChart data={gastosPorMes}>
+                        <XAxis dataKey="mes" tick={{ fontSize: 10 }} />
+                        <YAxis yAxisId="left" tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
+                        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
                         <Tooltip
-                          formatter={(value: number) => formatCOP(value)}
+                          formatter={(value: number, name: string) => [formatCOP(value), name === "balanceAcumulado" ? "Balance Acumulado" : name]}
                           labelFormatter={(label) => `Mes: ${label}`}
                         />
                         <Legend />
-                        <Bar dataKey="ingresos" fill="#22c55e" name="Ingresos" />
-                        <Bar dataKey="egresos" fill="#ef4444" name="Egresos" />
-                      </BarChart>
+                        <Bar yAxisId="left" dataKey="ingresos" fill="#22c55e" name="Ingresos" />
+                        <Bar yAxisId="left" dataKey="egresos" fill="#ef4444" name="Egresos" />
+                        <Line yAxisId="right" type="monotone" dataKey="balanceAcumulado" stroke="#3b82f6" strokeWidth={2} name="Balance Acumulado" dot={{ r: 3 }} />
+                      </ComposedChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                    <div className="h-[180px] flex items-center justify-center text-muted-foreground">
                       Sin datos
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Gastos por tipo */}
+              {/* Gastos por tipo - Top 5 with alert for pending */}
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Top 10 Gastos por Tipo</CardTitle>
+                  <CardTitle className="text-base">Top 5 Gastos por Tipo</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {gastosPorTipo.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={250}>
+                    <ResponsiveContainer width="100%" height={180}>
                       <PieChart>
                         <Pie
                           data={gastosPorTipo}
                           cx="50%"
                           cy="50%"
-                          outerRadius={80}
+                          outerRadius={60}
                           dataKey="value"
                           nameKey="name"
-                          label={({ name, percent }) =>
-                            `${name.slice(0, 12)}${name.length > 12 ? "..." : ""} ${(percent * 100).toFixed(0)}%`
+                          label={({ name, percent, isPending }) =>
+                            `${isPending ? "⚠️ " : ""}${name.slice(0, 10)}${name.length > 10 ? "..." : ""} ${(percent * 100).toFixed(0)}%`
                           }
                           labelLine={false}
                         >
-                          {gastosPorTipo.map((_, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          {gastosPorTipo.map((entry, index) => (
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={entry.isPending ? "#f59e0b" : COLORS[index % COLORS.length]} 
+                            />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value: number) => formatCOP(value)} />
+                        <Tooltip 
+                          formatter={(value: number) => formatCOP(value)} 
+                          labelFormatter={(label) => label === "Clasificación pendiente" ? `⚠️ ${label}` : label}
+                        />
                       </PieChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+                    <div className="h-[180px] flex items-center justify-center text-muted-foreground">
                       Sin egresos
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Gastos por subgasto */}
+              {/* Gastos por subgasto - Top 5 */}
               <Card className="lg:col-span-2">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Top 10 Gastos por Subgasto</CardTitle>
+                  <CardTitle className="text-base">Top 5 Gastos por Subgasto</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {gastosPorSubgasto.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={200}>
+                    <ResponsiveContainer width="100%" height={140}>
                       <BarChart data={gastosPorSubgasto} layout="vertical">
-                        <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
+                        <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
                         <YAxis
                           type="category"
                           dataKey="name"
-                          tick={{ fontSize: 11 }}
-                          width={120}
-                          tickFormatter={(v) => (v.length > 18 ? v.slice(0, 18) + "..." : v)}
+                          tick={({ x, y, payload }) => (
+                            <g transform={`translate(${x},${y})`}>
+                              <text x={0} y={0} dy={4} textAnchor="end" fill="#666" fontSize={10}>
+                                {payload.value === "Clasificación pendiente" ? "⚠️ " : ""}
+                                {payload.value.length > 16 ? payload.value.slice(0, 16) + "..." : payload.value}
+                              </text>
+                            </g>
+                          )}
+                          width={130}
                         />
                         <Tooltip formatter={(value: number) => formatCOP(value)} />
-                        <Bar dataKey="value" fill="#8884d8" name="Gasto" />
+                        <Bar 
+                          dataKey="value" 
+                          name="Gasto"
+                          fill="#8884d8"
+                        >
+                          {gastosPorSubgasto.map((entry, index) => (
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={entry.isPending ? "#f59e0b" : "#8884d8"} 
+                            />
+                          ))}
+                        </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                    <div className="h-[140px] flex items-center justify-center text-muted-foreground">
                       Sin egresos
                     </div>
                   )}
@@ -599,114 +706,151 @@ export default function Caja() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="pt-4">
-          <div className="rounded-md border overflow-x-auto">
-            <Table className="min-w-[1400px]">
-              <TableHeader>
-                <TableRow>
-                  <SortHead label="Registro" k="registro_id" />
-                  <SortHead label="Fecha" k="fecha" />
-                  <SortHead label="Pagado a" k="pagado_a" />
-                  <SortHead label="Concepto" k="concepto" />
-                  <SortHead label="Negocio" k="negocio" />
-                  <SortHead label="Tipo Gasto" k="tipo_gasto" />
-                  <SortHead label="Subgasto" k="subgasto" />
-                  <SortHead label="Valor" k="valor_num" className="text-right" />
-                  <TableHead>Obs.</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {paged.map((r, idx) => {
-                  const v = Number(r.valor_num ?? 0);
-                  const isNeg = Number.isFinite(v) && v < 0;
-
-                  return (
-                    <TableRow key={r.registro_id ?? String(idx)}>
-                      <TableCell className="whitespace-nowrap font-mono text-xs">
-                        {r.registro_id ?? "—"}
-                      </TableCell>
-
-                      <TableCell className="whitespace-nowrap">{r.fecha ?? "—"}</TableCell>
-
-                      <TableCell title={r.pagado_a ?? ""}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="h-7 w-7 rounded-full border flex items-center justify-center text-xs font-semibold shrink-0">
-                            {initials(r.pagado_a)}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="truncate max-w-[180px]">{r.pagado_a ?? "—"}</div>
-                          </div>
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="max-w-[250px] truncate">{r.concepto ?? "—"}</TableCell>
-                      <TableCell className="max-w-[140px] truncate">{r.negocio ?? "—"}</TableCell>
-                      <TableCell className="max-w-[140px] truncate">{r.tipo_gasto ?? "—"}</TableCell>
-                      <TableCell className="max-w-[140px] truncate">{r.subgasto ?? "—"}</TableCell>
-
-                      <TableCell
-                        className={[
-                          "text-right font-medium whitespace-nowrap",
-                          isNeg ? "text-red-600" : v > 0 ? "text-green-600" : "text-foreground",
-                        ].join(" ")}
-                        title={r.valor ?? undefined}
-                      >
-                        {Number.isFinite(v) ? formatCOP(v) : r.valor ?? "—"}
-                      </TableCell>
-
-                      <TableCell className="max-w-[280px] truncate">
-                        {r.observaciones ?? "—"}
-                      </TableCell>
+      {/* Collapsible Table */}
+      <Collapsible open={showTable} onOpenChange={setShowTable}>
+        <Card>
+          <CardHeader className="pb-2">
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="w-full justify-between p-0 h-auto hover:bg-transparent">
+                <CardTitle className="text-lg">Detalle de Movimientos</CardTitle>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>{filtered.length} registros</span>
+                  <ChevronDown className={`h-5 w-5 transition-transform ${showTable ? "rotate-180" : ""}`} />
+                </div>
+              </Button>
+            </CollapsibleTrigger>
+          </CardHeader>
+          
+          <CollapsibleContent>
+            <CardContent className="pt-2">
+              <div className="rounded-md border overflow-x-auto">
+                <Table className="min-w-[1400px]">
+                  <TableHeader>
+                    <TableRow>
+                      <SortHead label="Registro" k="registro_id" />
+                      <SortHead label="Fecha" k="fecha" />
+                      <SortHead label="Pagado a" k="pagado_a" />
+                      <SortHead label="Concepto" k="concepto" />
+                      <SortHead label="Negocio" k="negocio" />
+                      <SortHead label="Tipo Gasto" k="tipo_gasto" />
+                      <SortHead label="Subgasto" k="subgasto" />
+                      <SortHead label="Valor" k="valor_num" className="text-right" />
+                      <TableHead>Obs.</TableHead>
                     </TableRow>
-                  );
-                })}
+                  </TableHeader>
 
-                {paged.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10">
-                      {loading ? "Cargando movimientos..." : "No hay movimientos con esos filtros."}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                  <TableBody>
+                    {paged.map((r, idx) => {
+                      const v = Number(r.valor_num ?? 0);
+                      const isNeg = Number.isFinite(v) && v < 0;
+                      const hasPendingTipo = !r.tipo_gasto?.trim();
+                      const hasPendingSubgasto = !r.subgasto?.trim();
 
-          <div className="flex items-center justify-between mt-4 gap-2">
-            <div className="text-sm text-muted-foreground">{loading ? "Cargando..." : "Listo"}</div>
+                      return (
+                        <TableRow key={r.registro_id ?? String(idx)}>
+                          <TableCell className="whitespace-nowrap font-mono text-xs">
+                            {r.registro_id ?? "—"}
+                          </TableCell>
 
-            <div className="flex items-center gap-2">
-              <Button variant="outline" disabled={safePage <= 1} onClick={() => setPage(1)}>
-                « Primero
-              </Button>
-              <Button
-                variant="outline"
-                disabled={safePage <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                ‹ Anterior
-              </Button>
+                          <TableCell className="whitespace-nowrap">{r.fecha ?? "—"}</TableCell>
 
-              <span className="text-sm">
-                {safePage} / {totalPages}
-              </span>
+                          <TableCell title={r.pagado_a ?? ""}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="h-7 w-7 rounded-full border flex items-center justify-center text-xs font-semibold shrink-0">
+                                {initials(r.pagado_a)}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="truncate max-w-[180px]">{r.pagado_a ?? "—"}</div>
+                              </div>
+                            </div>
+                          </TableCell>
 
-              <Button
-                variant="outline"
-                disabled={safePage >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              >
-                Siguiente ›
-              </Button>
-              <Button variant="outline" disabled={safePage >= totalPages} onClick={() => setPage(totalPages)}>
-                Último »
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+                          <TableCell className="max-w-[250px] truncate">{r.concepto ?? "—"}</TableCell>
+                          <TableCell className="max-w-[140px] truncate">{r.negocio ?? "—"}</TableCell>
+                          <TableCell className="max-w-[140px] truncate">
+                            {hasPendingTipo ? (
+                              <span className="flex items-center gap-1 text-amber-600">
+                                <AlertTriangle className="h-3 w-3" />
+                                Clasificación pendiente
+                              </span>
+                            ) : (
+                              r.tipo_gasto
+                            )}
+                          </TableCell>
+                          <TableCell className="max-w-[140px] truncate">
+                            {hasPendingSubgasto ? (
+                              <span className="flex items-center gap-1 text-amber-600">
+                                <AlertTriangle className="h-3 w-3" />
+                                Clasificación pendiente
+                              </span>
+                            ) : (
+                              r.subgasto
+                            )}
+                          </TableCell>
+
+                          <TableCell
+                            className={[
+                              "text-right font-medium whitespace-nowrap",
+                              isNeg ? "text-red-600" : v > 0 ? "text-green-600" : "text-foreground",
+                            ].join(" ")}
+                            title={r.valor ?? undefined}
+                          >
+                            {Number.isFinite(v) ? formatCOP(v) : r.valor ?? "—"}
+                          </TableCell>
+
+                          <TableCell className="max-w-[280px] truncate">
+                            {r.observaciones ?? "—"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+
+                    {paged.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center py-10">
+                          {loading ? "Cargando movimientos..." : "No hay movimientos con esos filtros."}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex items-center justify-between mt-4 gap-2">
+                <div className="text-sm text-muted-foreground">{loading ? "Cargando..." : "Listo"}</div>
+
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" disabled={safePage <= 1} onClick={() => setPage(1)}>
+                    « Primero
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={safePage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    ‹ Anterior
+                  </Button>
+
+                  <span className="text-sm">
+                    {safePage} / {totalPages}
+                  </span>
+
+                  <Button
+                    variant="outline"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Siguiente ›
+                  </Button>
+                  <Button variant="outline" disabled={safePage >= totalPages} onClick={() => setPage(totalPages)}>
+                    Último »
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
     </div>
   );
 }
