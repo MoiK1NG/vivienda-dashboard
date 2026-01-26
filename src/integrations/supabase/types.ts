@@ -68,6 +68,60 @@ export type Database = {
         }
         Relationships: []
       }
+      caja_consorcio_2024: {
+        Row: {
+          concepto: string | null
+          doc_identidad: string | null
+          factura: string | null
+          fecha: string | null
+          negocio: string | null
+          observaciones: string | null
+          pagado_a: string | null
+          registro_id: string
+          retencion: string | null
+          subgasto: string | null
+          tercer_destino_giro: string | null
+          tipo_gasto: string | null
+          updated_at: string | null
+          valor: string
+          valor_num: number | null
+        }
+        Insert: {
+          concepto?: string | null
+          doc_identidad?: string | null
+          factura?: string | null
+          fecha?: string | null
+          negocio?: string | null
+          observaciones?: string | null
+          pagado_a?: string | null
+          registro_id: string
+          retencion?: string | null
+          subgasto?: string | null
+          tercer_destino_giro?: string | null
+          tipo_gasto?: string | null
+          updated_at?: string | null
+          valor?: string
+          valor_num?: number | null
+        }
+        Update: {
+          concepto?: string | null
+          doc_identidad?: string | null
+          factura?: string | null
+          fecha?: string | null
+          negocio?: string | null
+          observaciones?: string | null
+          pagado_a?: string | null
+          registro_id?: string
+          retencion?: string | null
+          subgasto?: string | null
+          tercer_destino_giro?: string | null
+          tipo_gasto?: string | null
+          updated_at?: string | null
+          valor?: string
+          valor_num?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
