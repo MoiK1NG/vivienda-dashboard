@@ -2,11 +2,13 @@
 
 import React, { useMemo, useState } from "react";
 import { useCajaConsorcio } from "@/hooks/useCajaConsorcio";
+import { useCajaConsorcio2024 } from "@/hooks/useCajaConsorcio2024";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Collapsible,
   CollapsibleContent,
@@ -34,7 +36,7 @@ import {
   Line,
   ComposedChart,
 } from "recharts";
-import { AlertTriangle, ChevronDown, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertTriangle, ChevronDown, TrendingDown, TrendingUp, Calendar } from "lucide-react";
 
 type CajaRow = {
   registro_id?: string;
@@ -48,6 +50,7 @@ type CajaRow = {
   tipo_gasto?: string;
   subgasto?: string;
   updated_at?: string;
+  _source?: string; // To identify which table the row came from
 };
 
 type SortKey =
@@ -59,6 +62,8 @@ type SortKey =
   | "valor_num"
   | "tipo_gasto"
   | "subgasto";
+
+type DataSource = "2025" | "2024" | "todos";
 
 function toDateMs(yyyyMmDd?: string): number {
   if (!yyyyMmDd) return 0;
@@ -87,7 +92,7 @@ function initials(name?: string) {
   return parts.map((p) => (p[0] ?? "").toUpperCase()).join("");
 }
 
-function exportCsv(rows: CajaRow[]) {
+function exportCsv(rows: CajaRow[], source: DataSource) {
   const headers = [
     "registro_id",
     "fecha",
@@ -118,7 +123,7 @@ function exportCsv(rows: CajaRow[]) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `caja_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `caja_${source}_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -137,14 +142,37 @@ const COLORS = [
 ];
 
 export default function Caja() {
-  const caja: any = useCajaConsorcio();
+  // Data sources
+  const caja2025: any = useCajaConsorcio();
+  const caja2024: any = useCajaConsorcio2024();
 
-  const rows: CajaRow[] = (caja?.rows ?? caja?.data ?? caja?.caja ?? []) as CajaRow[];
-  const loading: boolean = Boolean(
-    caja?.loading ?? caja?.isLoading ?? caja?.isFetching ?? caja?.fetching
-  );
-  const error: any = caja?.error ?? caja?.err ?? null;
-  const refetch: (() => void) | undefined = caja?.refetch ?? caja?.reload ?? caja?.refresh;
+  // Data source selector
+  const [dataSource, setDataSource] = useState<DataSource>("2025");
+
+  // Get rows based on selected data source
+  const rows: CajaRow[] = useMemo(() => {
+    const rows2025: CajaRow[] = (caja2025?.data ?? []).map((r: any) => ({ ...r, _source: "2025" }));
+    const rows2024: CajaRow[] = (caja2024?.data ?? []).map((r: any) => ({ ...r, _source: "2024" }));
+
+    switch (dataSource) {
+      case "2025":
+        return rows2025;
+      case "2024":
+        return rows2024;
+      case "todos":
+        return [...rows2025, ...rows2024];
+      default:
+        return rows2025;
+    }
+  }, [caja2025?.data, caja2024?.data, dataSource]);
+
+  const loading: boolean = Boolean(caja2025?.isLoading || caja2024?.isLoading);
+  const error: any = caja2025?.error ?? caja2024?.error ?? null;
+  
+  const refetch = () => {
+    caja2025?.refetch?.();
+    caja2024?.refetch?.();
+  };
 
   // Filters
   const [search, setSearch] = useState("");
@@ -172,6 +200,12 @@ export default function Caja() {
       setSortKey(key);
       setSortDir("desc");
     }
+  };
+
+  // Reset page when data source changes
+  const handleDataSourceChange = (value: string) => {
+    setDataSource(value as DataSource);
+    setPage(1);
   };
 
   const filtered = useMemo(() => {
@@ -405,8 +439,25 @@ export default function Caja() {
   return (
     <div className="p-4 space-y-4">
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Caja</CardTitle>
+        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <CardTitle>Caja</CardTitle>
+            <Tabs value={dataSource} onValueChange={handleDataSourceChange}>
+              <TabsList>
+                <TabsTrigger value="2025" className="flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  2025
+                </TabsTrigger>
+                <TabsTrigger value="2024" className="flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  2024
+                </TabsTrigger>
+                <TabsTrigger value="todos" className="flex items-center gap-1">
+                  Todos
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant={showCharts ? "default" : "outline"}
@@ -414,14 +465,14 @@ export default function Caja() {
             >
               {showCharts ? "Ocultar gráficos" : "Mostrar gráficos"}
             </Button>
-            <Button variant="outline" onClick={() => exportCsv(filtered)} disabled={loading}>
+            <Button variant="outline" onClick={() => exportCsv(filtered, dataSource)} disabled={loading}>
               Exportar CSV
             </Button>
             <Button
               variant="outline"
-              onClick={() => (refetch ? refetch() : undefined)}
-              disabled={loading || !refetch}
-              title={!refetch ? "Tu hook no expone refetch()" : "Actualizar"}
+              onClick={() => refetch()}
+              disabled={loading}
+              title="Actualizar"
             >
               Actualizar
             </Button>
@@ -681,6 +732,10 @@ export default function Caja() {
 
               <Badge variant="secondary">
                 Página {safePage} / {totalPages}
+              </Badge>
+
+              <Badge variant="secondary">
+                Fuente: {dataSource === "todos" ? "2024 + 2025" : dataSource}
               </Badge>
 
               <Badge variant="secondary">
