@@ -369,20 +369,47 @@ export default function Caja() {
     });
   }, [filtered]);
 
-  // Chart data: Gastos por subgasto
-  const gastosPorSubgasto = useMemo(() => {
-    const map = new Map<string, number>();
+  // Chart data: Distribución por negocio
+  const gastosPorNegocio = useMemo(() => {
+    const map = new Map<string, { ingresos: number; egresos: number }>();
     for (const r of filtered) {
       const v = Number(r.valor_num ?? 0);
-      if (v >= 0) continue;
-      const key = r.subgasto?.trim() || "";
-      const displayName = key === "" ? "Clasificación pendiente" : key;
-      map.set(displayName, (map.get(displayName) ?? 0) + Math.abs(v));
+      if (!Number.isFinite(v)) continue;
+      const key = r.negocio?.trim() || "Sin negocio";
+      const current = map.get(key) ?? { ingresos: 0, egresos: 0 };
+      if (v >= 0) current.ingresos += v;
+      else current.egresos += Math.abs(v);
+      map.set(key, current);
     }
     return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value, isPending: name === "Clasificación pendiente" }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
+      .map(([name, data]) => ({ name, ...data, total: data.ingresos + data.egresos }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 8);
+  }, [filtered]);
+
+  // Chart data: Flujo de caja semanal
+  const flujoCajaSemanal = useMemo(() => {
+    const map = new Map<string, { ingresos: number; egresos: number }>();
+    for (const r of filtered) {
+      const v = Number(r.valor_num ?? 0);
+      if (!Number.isFinite(v) || !r.fecha) continue;
+      
+      // Get week number
+      const date = new Date(r.fecha);
+      const startOfYear = new Date(date.getFullYear(), 0, 1);
+      const days = Math.floor((date.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000));
+      const weekNum = Math.ceil((days + startOfYear.getDay() + 1) / 7);
+      const weekKey = `${date.getFullYear()}-S${String(weekNum).padStart(2, "0")}`;
+      
+      const current = map.get(weekKey) ?? { ingresos: 0, egresos: 0 };
+      if (v >= 0) current.ingresos += v;
+      else current.egresos += Math.abs(v);
+      map.set(weekKey, current);
+    }
+    return Array.from(map.entries())
+      .map(([semana, data]) => ({ semana, ...data, neto: data.ingresos - data.egresos }))
+      .sort((a, b) => a.semana.localeCompare(b.semana))
+      .slice(-12); // Last 12 weeks
   }, [filtered]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -610,47 +637,60 @@ export default function Caja() {
                 </CardContent>
               </Card>
 
-              {/* Gastos por subgasto - Top 5 */}
-              <Card className="lg:col-span-2">
+              {/* Distribución por Negocio */}
+              <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Top 5 Gastos por Subgasto</CardTitle>
+                  <CardTitle className="text-base">Distribución por Negocio</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {gastosPorSubgasto.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={140}>
-                      <BarChart data={gastosPorSubgasto} layout="vertical">
+                  {gastosPorNegocio.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart data={gastosPorNegocio} layout="vertical">
                         <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
                         <YAxis
                           type="category"
                           dataKey="name"
-                          tick={({ x, y, payload }) => (
-                            <g transform={`translate(${x},${y})`}>
-                              <text x={0} y={0} dy={4} textAnchor="end" fill="#666" fontSize={10}>
-                                {payload.value === "Clasificación pendiente" ? "⚠️ " : ""}
-                                {payload.value.length > 16 ? payload.value.slice(0, 16) + "..." : payload.value}
-                              </text>
-                            </g>
-                          )}
-                          width={130}
+                          tick={{ fontSize: 10 }}
+                          width={100}
                         />
                         <Tooltip formatter={(value: number) => formatCOP(value)} />
-                        <Bar 
-                          dataKey="value" 
-                          name="Gasto"
-                          fill="#8884d8"
-                        >
-                          {gastosPorSubgasto.map((entry, index) => (
-                            <Cell 
-                              key={`cell-${index}`} 
-                              fill={entry.isPending ? "#f59e0b" : "#8884d8"} 
-                            />
-                          ))}
-                        </Bar>
+                        <Legend />
+                        <Bar dataKey="ingresos" fill="#22c55e" name="Ingresos" stackId="a" />
+                        <Bar dataKey="egresos" fill="#ef4444" name="Egresos" stackId="a" />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-[140px] flex items-center justify-center text-muted-foreground">
-                      Sin egresos
+                    <div className="h-[180px] flex items-center justify-center text-muted-foreground">
+                      Sin datos
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Flujo de Caja Semanal */}
+              <Card className="lg:col-span-2">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Flujo de Caja Semanal (últimas 12 semanas)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {flujoCajaSemanal.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={160}>
+                      <ComposedChart data={flujoCajaSemanal}>
+                        <XAxis dataKey="semana" tick={{ fontSize: 9 }} />
+                        <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v / 1000000).toFixed(1)}M`} />
+                        <Tooltip
+                          formatter={(value: number, name: string) => [formatCOP(value), name === "neto" ? "Balance Neto" : name === "ingresos" ? "Ingresos" : "Egresos"]}
+                          labelFormatter={(label) => `Semana: ${label}`}
+                        />
+                        <Legend />
+                        <Bar dataKey="ingresos" fill="#22c55e" name="Ingresos" />
+                        <Bar dataKey="egresos" fill="#ef4444" name="Egresos" />
+                        <Line type="monotone" dataKey="neto" stroke="#3b82f6" strokeWidth={2} name="Balance Neto" dot={{ r: 2 }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[160px] flex items-center justify-center text-muted-foreground">
+                      Sin datos
                     </div>
                   )}
                 </CardContent>
