@@ -82,7 +82,7 @@ type SortKey =
   | "tipo_gasto"
   | "subgasto";
 
-type DataSource = "2025" | "2024" | "todos";
+type YearFilter = "todos" | "2024" | "2025" | "2026";
 
 function toDateMs(yyyyMmDd?: string): number {
   if (!yyyyMmDd) return 0;
@@ -119,7 +119,7 @@ function initials(name?: string) {
   return parts.map((p) => (p[0] ?? "").toUpperCase()).join("");
 }
 
-function exportCsv(rows: CajaRow[], source: DataSource) {
+function exportCsv(rows: CajaRow[], source: YearFilter) {
   const headers = [
     "registro_id", "fecha", "pagado_a", "concepto", "negocio",
     "tipo_gasto", "subgasto", "valor_num", "observaciones", "updated_at",
@@ -140,7 +140,7 @@ function exportCsv(rows: CajaRow[], source: DataSource) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `caja_${source}_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `caja_${String(source)}_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -175,19 +175,21 @@ export default function Caja() {
   const caja2025: any = useCajaConsorcio();
   const caja2024: any = useCajaConsorcio2024();
 
-  const [dataSource, setDataSource] = useState<DataSource>("2025");
+  const [selectedYear, setSelectedYear] = useState<YearFilter>("todos");
   const [selectedMonth, setSelectedMonth] = useState<string>("");
 
-  const rows: CajaRow[] = useMemo(() => {
+  // Always combine all data from both tables
+  const allRows: CajaRow[] = useMemo(() => {
     const rows2025: CajaRow[] = (caja2025?.data ?? []).map((r: any) => ({ ...r, _source: "2025" }));
     const rows2024: CajaRow[] = (caja2024?.data ?? []).map((r: any) => ({ ...r, _source: "2024" }));
-    switch (dataSource) {
-      case "2025": return rows2025;
-      case "2024": return rows2024;
-      case "todos": return [...rows2025, ...rows2024];
-      default: return rows2025;
-    }
-  }, [caja2025?.data, caja2024?.data, dataSource]);
+    return [...rows2025, ...rows2024];
+  }, [caja2025?.data, caja2024?.data]);
+
+  // Filter by year based on fecha column
+  const rows: CajaRow[] = useMemo(() => {
+    if (selectedYear === "todos") return allRows;
+    return allRows.filter((r) => r.fecha?.startsWith(selectedYear));
+  }, [allRows, selectedYear]);
 
   const loading = Boolean(caja2025?.isLoading || caja2024?.isLoading);
   const error: any = caja2025?.error ?? caja2024?.error ?? null;
@@ -215,8 +217,8 @@ export default function Caja() {
     else { setSortKey(key); setSortDir("desc"); }
   };
 
-  const handleDataSourceChange = (value: string) => {
-    setDataSource(value as DataSource);
+  const handleYearChange = (value: string) => {
+    setSelectedYear(value as YearFilter);
     setPage(1);
     setSelectedMonth("");
   };
@@ -458,7 +460,7 @@ export default function Caja() {
     );
   }
 
-  const periodLabel = dataSource === "todos" ? "2024-2025" : dataSource;
+  const periodLabel = selectedYear === "todos" ? "2024-2026" : selectedYear;
 
   return (
     <div className="p-4 md:p-6 space-y-5">
@@ -473,8 +475,11 @@ export default function Caja() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Tabs value={dataSource} onValueChange={handleDataSourceChange}>
+          <Tabs value={selectedYear} onValueChange={handleYearChange}>
             <TabsList className="bg-secondary">
+              <TabsTrigger value="2026" className="text-xs gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                <Calendar className="h-3 w-3" /> 2026
+              </TabsTrigger>
               <TabsTrigger value="2025" className="text-xs gap-1 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
                 <Calendar className="h-3 w-3" /> 2025
               </TabsTrigger>
@@ -493,7 +498,7 @@ export default function Caja() {
               <span className="ml-1 h-5 w-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">!</span>
             )}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => exportCsv(filtered, dataSource)} disabled={loading} className="gap-1.5">
+          <Button variant="outline" size="sm" onClick={() => exportCsv(filtered, selectedYear)} disabled={loading} className="gap-1.5">
             <Download className="h-3.5 w-3.5" /> CSV
           </Button>
           <Button variant="outline" size="sm" onClick={refetch} disabled={loading} className="gap-1.5">
