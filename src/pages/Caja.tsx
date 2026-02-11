@@ -337,19 +337,20 @@ export default function Caja() {
   }, [filtered]);
 
   // Chart data
-  const gastosPorTipo = useMemo(() => {
+  const ingresosPorCategoria = useMemo(() => {
     const map = new Map<string, number>();
     for (const r of filtered) {
       const v = Number(r.valor_num ?? 0);
-      if (v >= 0) continue;
-      const key = r.tipo_gasto?.trim() || "";
-      const displayName = key === "" ? "Clasificación pendiente" : key;
-      map.set(displayName, (map.get(displayName) ?? 0) + Math.abs(v));
+      if (v <= 0) continue;
+      const tipo = r.tipo_gasto?.trim() || "";
+      const sub = r.subgasto?.trim() || "";
+      const key = sub ? `${tipo || "Sin tipo"} · ${sub}` : (tipo || "Sin clasificar");
+      map.set(key, (map.get(key) ?? 0) + v);
     }
     return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value, isPending: name === "Clasificación pendiente" }))
+      .map(([name, value]) => ({ name, value, isPending: name === "Sin clasificar" }))
       .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
+      .slice(0, 8);
   }, [filtered]);
 
   const gastosPorMes = useMemo(() => {
@@ -408,7 +409,7 @@ export default function Caja() {
     return Array.from(map.entries())
       .map(([semana, data]) => ({ semana, ...data, neto: data.ingresos - data.egresos }))
       .sort((a, b) => a.semana.localeCompare(b.semana))
-      .slice(-12);
+      .slice(-4);
   }, [filtered]);
 
   // Top pagados (like "productos más vendidos" in reference)
@@ -740,16 +741,16 @@ export default function Caja() {
 
       {/* Second row of charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* Gastos por Tipo */}
+        {/* Ingresos por Categoría */}
         <Card>
           <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-sm font-semibold">Gastos por Categoría</CardTitle>
+            <CardTitle className="text-sm font-semibold">Ingresos por Categoría</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
-            {gastosPorTipo.length > 0 ? (
+            {ingresosPorCategoria.length > 0 ? (
               <div className="space-y-2.5">
-                {gastosPorTipo.map((item, i) => {
-                  const maxVal = gastosPorTipo[0]?.value ?? 1;
+                {ingresosPorCategoria.map((item, i) => {
+                  const maxVal = ingresosPorCategoria[0]?.value ?? 1;
                   const pct = (item.value / maxVal) * 100;
                   return (
                     <div key={item.name} className="flex items-center gap-3">
@@ -775,7 +776,7 @@ export default function Caja() {
                 })}
               </div>
             ) : (
-              <div className="h-[160px] flex items-center justify-center text-muted-foreground text-sm">Sin egresos</div>
+              <div className="h-[160px] flex items-center justify-center text-muted-foreground text-sm">Sin ingresos</div>
             )}
           </CardContent>
         </Card>
@@ -809,7 +810,7 @@ export default function Caja() {
         {/* Flujo de Caja Semanal */}
         <Card>
           <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-sm font-semibold">Flujo Semanal (12 sem)</CardTitle>
+            <CardTitle className="text-sm font-semibold">Flujo Semanal (4 sem)</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             {flujoCajaSemanal.length > 0 ? (
