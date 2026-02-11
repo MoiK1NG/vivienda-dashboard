@@ -392,23 +392,30 @@ export default function Caja() {
   }, [filtered]);
 
   const flujoCajaSemanal = useMemo(() => {
-    const map = new Map<string, { ingresos: number; egresos: number }>();
+    const MONTH_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+    const map = new Map<string, { ingresos: number; egresos: number; weekStart: Date }>();
     for (const r of filtered) {
       const v = Number(r.valor_num ?? 0);
       if (!Number.isFinite(v) || !r.fecha) continue;
       const date = new Date(r.fecha);
-      const startOfYear = new Date(date.getFullYear(), 0, 1);
-      const days = Math.floor((date.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000));
-      const weekNum = Math.ceil((days + startOfYear.getDay() + 1) / 7);
-      const weekKey = `${date.getFullYear()}-S${String(weekNum).padStart(2, "0")}`;
-      const current = map.get(weekKey) ?? { ingresos: 0, egresos: 0 };
+      // Get Monday of this week
+      const day = date.getDay();
+      const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(date.getFullYear(), date.getMonth(), diff);
+      const weekKey = monday.toISOString().slice(0, 10);
+      const current = map.get(weekKey) ?? { ingresos: 0, egresos: 0, weekStart: monday };
       if (v >= 0) current.ingresos += v;
       else current.egresos += Math.abs(v);
       map.set(weekKey, current);
     }
     return Array.from(map.entries())
-      .map(([semana, data]) => ({ semana, ...data, neto: data.ingresos - data.egresos }))
-      .sort((a, b) => a.semana.localeCompare(b.semana))
+      .map(([key, data]) => {
+        const ws = data.weekStart;
+        const we = new Date(ws.getTime() + 6 * 24 * 60 * 60 * 1000);
+        const label = `${ws.getDate()}-${we.getDate()} ${MONTH_SHORT[we.getMonth()]}`;
+        return { semana: label, sortKey: key, ...data, neto: data.ingresos - data.egresos };
+      })
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
       .slice(-4);
   }, [filtered]);
 
